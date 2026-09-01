@@ -36,6 +36,6 @@
     "@aasp/security-core": "workspace:*",
     "@aasp/technology-fingerprinter": "workspace:*",
     "bullmq": "6.3.2",
-    "ioredis": "5.8.2"
+    "ioredis": "6.0.0"
   }
 }
