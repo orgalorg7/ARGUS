@@ -11,6 +11,7 @@
     "dev": "pnpm --parallel --filter @aasp/api --filter @aasp/worker --filter @aasp/web dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "prelint": "pnpm pretypecheck",
     "lint": "eslint . --max-warnings=0",
     "pretypecheck": "pnpm --filter @aasp/schemas build && pnpm --filter @aasp/database build && pnpm --filter @aasp/logger build && pnpm --filter @aasp/scope-engine build && pnpm --filter @aasp/security-core build && pnpm --filter @aasp/evidence-engine build && pnpm --filter @aasp/crawler build && pnpm --filter @aasp/api-discovery build && pnpm --filter @aasp/technology-fingerprinter build && pnpm --filter @aasp/scanner-integrations build && pnpm --filter @aasp/scanner-http build && pnpm --filter @aasp/scanner-headers build && pnpm --filter @aasp/scanner-cookies build && pnpm --filter @aasp/scanner-auth-surface build && pnpm --filter @aasp/scanner-misconfiguration build && pnpm --filter @aasp/scanner-tls build && pnpm --filter @aasp/scanner-cors build && pnpm --filter @aasp/finding-engine build && pnpm --filter @aasp/correlation-engine build && pnpm --filter @aasp/ai-engine build && pnpm --filter @aasp/report-engine build",
     "typecheck": "pnpm -r --if-present typecheck",
