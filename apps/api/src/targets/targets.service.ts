@@ -1,31 +1,103 @@
-import { createHash, randomBytes } from "node:crypto";
-import { resolveTxt } from "node:dns/promises";
 import {
   BadRequestException,
-  ForbiddenException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { TargetStatus, VerificationMethod, VerificationStatus } from "@aasp/database";
-import { ScopeEngine, ScopedHttpClient, normalizeAssessmentUrl } from "@aasp/scope-engine";
+import { TargetStatus, type Prisma } from "@aasp/database";
+import { targetScopeSchema, type TargetScopeInput } from "@aasp/schemas";
+import { normalizeAssessmentUrl, scopePolicyFromTarget } from "@aasp/scope-engine";
 import { AuditService } from "../audit/audit.service.js";
-import type { AuthenticatedUser } from "../auth/auth.types.js";
 import { PrismaService } from "../database/prisma.service.js";
 
-const verificationLifetimeMs = 24 * 60 * 60 * 1000;
-const authorizationLifetimeMs = 30 * 24 * 60 * 60 * 1000;
-
-function tokenHash(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
+interface NormalizedTargetScope {
+  allowedDomains: string[];
+  includeSubdomains: boolean;
+  allowedPorts: number[];
+  excludedPaths: string[];
+  allowPrivateNetwork: boolean;
 }
 
-function isFixtureHostname(hostname: string): boolean {
-  return (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "::1" ||
-    hostname.endsWith(".internal")
-  );
+function normalizeDomain(input: string): string {
+  const trimmed = input.trim().toLowerCase().replace(/\.$/u, "");
+  let parsed: URL;
+  try {
+    parsed = normalizeAssessmentUrl(`http://${trimmed}`);
+  } catch {
+    throw new BadRequestException(`Allowed domain is invalid: ${input}`);
+  }
+  if (
+    parsed.port ||
+    parsed.pathname !== "/" ||
+    parsed.search ||
+    parsed.hash ||
+    parsed.username ||
+    parsed.password
+  ) {
+    throw new BadRequestException(`Allowed domain must contain only a hostname: ${input}`);
+  }
+  return parsed.hostname.replace(/^\[|\]$/gu, "");
+}
+
+function normalizeExcludedPath(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith("/") || trimmed.includes("?") || trimmed.includes("#")) {
+    throw new BadRequestException(
+      `Excluded path must be an absolute path without a query: ${input}`,
+    );
+  }
+  const normalized = new URL(trimmed, "https://scope.invalid").pathname;
+  if (normalized !== trimmed || normalized.includes("//")) {
+    throw new BadRequestException(`Excluded path is not canonical: ${input}`);
+  }
+  return normalized;
+}
+
+function normalizeScope(origin: URL, input: TargetScopeInput): NormalizedTargetScope {
+  const parsed = targetScopeSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new BadRequestException(parsed.error.issues.map(({ message }) => message).join(" "));
+  }
+  const allowedDomains = [...new Set(parsed.data.allowedDomains.map(normalizeDomain))].sort();
+  const originHostname = origin.hostname.replace(/^\[|\]$/gu, "");
+  if (!allowedDomains.includes(originHostname)) {
+    throw new BadRequestException(
+      "The target origin hostname must be explicitly included in allowedDomains.",
+    );
+  }
+  const allowedPorts = [...new Set(parsed.data.allowedPorts)].sort((left, right) => left - right);
+  const originPort = Number(origin.port || (origin.protocol === "https:" ? 443 : 80));
+  if (!allowedPorts.includes(originPort)) {
+    throw new BadRequestException(
+      `The target origin port ${originPort} must be explicitly included in allowedPorts.`,
+    );
+  }
+  return {
+    allowedDomains,
+    includeSubdomains: parsed.data.includeSubdomains,
+    allowedPorts,
+    excludedPaths: [...new Set(parsed.data.excludedPaths.map(normalizeExcludedPath))].sort(),
+    allowPrivateNetwork: parsed.data.allowPrivateNetwork,
+  };
+}
+
+function scopeRuleData(
+  workspaceId: string,
+  scope: NormalizedTargetScope,
+): Prisma.ScopeRuleUncheckedCreateWithoutTargetInput[] {
+  return [
+    ...scope.allowedDomains.map((value) => ({ workspaceId, type: "HOST" as const, value })),
+    ...scope.allowedPorts.map((value) => ({
+      workspaceId,
+      type: "PORT" as const,
+      value: String(value),
+    })),
+    ...scope.excludedPaths.map((value) => ({
+      workspaceId,
+      type: "PATH_EXCLUDE" as const,
+      value,
+    })),
+  ];
 }
 
 @Injectable()
@@ -38,7 +110,12 @@ export class TargetsService {
   list(workspaceId: string) {
     return this.prisma.target.findMany({
       where: { workspaceId },
-      include: { verifications: { orderBy: { createdAt: "desc" }, take: 1 } },
+      include: {
+        scopeRules: {
+          where: { enabled: true },
+          orderBy: [{ type: "asc" }, { value: "asc" }],
+        },
+      },
       orderBy: { createdAt: "desc" },
     });
   }
@@ -46,178 +123,115 @@ export class TargetsService {
   async create(
     workspaceId: string,
     actorId: string,
-    input: { name: string; url: string; method: VerificationMethod },
+    input: { name: string; url: string; scope?: TargetScopeInput },
   ) {
-    const parsed = normalizeAssessmentUrl(input.url);
-    const origin = parsed.origin;
-    const normalizedHostname = parsed.hostname.replace(/^\[|\]$/g, "");
-    const token = randomBytes(32).toString("base64url");
+    const origin = normalizeAssessmentUrl(input.url);
+    const normalizedHostname = origin.hostname.replace(/^\[|\]$/gu, "");
+    const scope = input.scope ? normalizeScope(origin, input.scope) : null;
     const target = await this.prisma.target.create({
       data: {
         workspaceId,
         createdById: actorId,
         name: input.name.trim(),
-        origin,
+        origin: origin.origin,
         normalizedHostname,
-        normalizedPort: parsed.port ? Number(parsed.port) : null,
-        status: TargetStatus.PENDING_VERIFICATION,
-        verifications: {
-          create: {
-            workspaceId,
-            method: input.method,
-            tokenHash: tokenHash(token),
-            tokenHint: token.slice(0, 6),
-            expiresAt: new Date(Date.now() + verificationLifetimeMs),
-          },
-        },
+        normalizedPort: origin.port ? Number(origin.port) : null,
+        status: scope ? TargetStatus.READY : TargetStatus.DRAFT,
+        includeSubdomains: scope?.includeSubdomains ?? false,
+        allowPrivateNetwork: scope?.allowPrivateNetwork ?? false,
+        ...(scope ? { scopeRules: { create: scopeRuleData(workspaceId, scope) } } : {}),
+      },
+      include: {
         scopeRules: {
-          create: { workspaceId, type: "HOST", value: normalizedHostname },
+          where: { enabled: true },
+          orderBy: [{ type: "asc" }, { value: "asc" }],
         },
       },
-      include: { verifications: { orderBy: { createdAt: "desc" }, take: 1 } },
     });
     await this.audit.record({
       workspaceId,
       actorId,
-      action: "target.registered",
-      resourceType: "Target",
-      resourceId: target.id,
-      metadata: { origin, verificationMethod: input.method },
-    });
-    return {
-      target,
-      verification: {
-        method: input.method,
-        token,
-        dnsRecord: `_security-assessment.${normalizedHostname}`,
-        dnsValue: `aasp-verification=${token}`,
-        wellKnownUrl: `${origin}/.well-known/security-assessment-verification`,
-      },
-    };
-  }
-
-  async verify(
-    workspaceId: string,
-    targetId: string,
-    actor: AuthenticatedUser,
-    suppliedToken: string | undefined,
-  ) {
-    const target = await this.prisma.target.findFirst({
-      where: { id: targetId, workspaceId },
-      include: {
-        verifications: {
-          where: { status: VerificationStatus.PENDING },
-          orderBy: { createdAt: "desc" },
-          take: 1,
-        },
-      },
-    });
-    if (!target) throw new NotFoundException("Target does not exist in this workspace.");
-    if (target.status === TargetStatus.DISABLED)
-      throw new BadRequestException("Disabled targets cannot be verified.");
-    const verification = target.verifications[0];
-    if (!verification) throw new BadRequestException("No pending verification challenge exists.");
-    if (verification.expiresAt <= new Date()) {
-      await this.prisma.targetVerification.update({
-        where: { id: verification.id },
-        data: {
-          status: VerificationStatus.EXPIRED,
-          failureReason: "Verification challenge expired.",
-        },
-      });
-      throw new BadRequestException("Verification challenge expired.");
-    }
-
-    try {
-      if (verification.method === VerificationMethod.MANUAL_ADMIN) {
-        if (!actor.isSystemAdmin)
-          throw new ForbiddenException("Manual fixture approval requires a system administrator.");
-        if (!isFixtureHostname(target.normalizedHostname)) {
-          throw new ForbiddenException(
-            "Manual approval is restricted to local or internal fixture hostnames.",
-          );
-        }
-      } else {
-        if (!suppliedToken || tokenHash(suppliedToken) !== verification.tokenHash) {
-          throw new BadRequestException("Verification token is invalid.");
-        }
-        const policy = {
-          targetOrigin: target.origin,
-          includeSubdomains: false,
-          allowPrivateNetwork: false,
-        };
-        const scopeEngine = new ScopeEngine();
-        if (verification.method === VerificationMethod.DNS_TXT) {
-          await scopeEngine.assertAllowed(target.origin, policy);
-          const records = (
-            await resolveTxt(`_security-assessment.${target.normalizedHostname}`)
-          ).flat();
-          if (!records.includes(`aasp-verification=${suppliedToken}`)) {
-            throw new BadRequestException("Expected DNS TXT verification value was not found.");
-          }
-        } else {
-          const client = new ScopedHttpClient(scopeEngine, policy);
-          const response = await client.request(
-            `${target.origin}/.well-known/security-assessment-verification`,
-            { timeoutMs: 8_000, maxResponseBytes: 4_096, followRedirects: false },
-          );
-          if (
-            response.statusCode !== 200 ||
-            response.body.toString("utf8").trim() !== suppliedToken
-          ) {
-            throw new BadRequestException(
-              "Well-known verification response did not match the challenge.",
-            );
-          }
-        }
-      }
-    } catch (error: unknown) {
-      await this.prisma.targetVerification.update({
-        where: { id: verification.id },
-        data: {
-          attemptCount: { increment: 1 },
-          lastAttemptAt: new Date(),
-          failureReason:
-            error instanceof Error ? error.message.slice(0, 500) : "Verification failed.",
-        },
-      });
-      throw error;
-    }
-
-    const now = new Date();
-    const verifiedTarget = await this.prisma.$transaction(async (transaction) => {
-      await transaction.targetVerification.update({
-        where: { id: verification.id },
-        data: {
-          status: VerificationStatus.SUCCEEDED,
-          attemptCount: { increment: 1 },
-          lastAttemptAt: now,
-          verifiedAt: now,
-          verifierUserId: actor.id,
-          failureReason: null,
-        },
-      });
-      return transaction.target.update({
-        where: { id: target.id },
-        data: {
-          status: TargetStatus.VERIFIED,
-          verifiedAt: now,
-          authorizationExpiresAt: new Date(now.getTime() + authorizationLifetimeMs),
-          allowPrivateNetwork: verification.method === VerificationMethod.MANUAL_ADMIN,
-        },
-      });
-    });
-    await this.audit.record({
-      workspaceId,
-      actorId: actor.id,
-      action: "target.verified",
+      action: scope ? "target.scope_configured" : "target.created",
       resourceType: "Target",
       resourceId: target.id,
       metadata: {
-        method: verification.method,
-        allowPrivateNetwork: verifiedTarget.allowPrivateNetwork,
+        origin: target.origin,
+        status: target.status,
+        allowedDomains: scope?.allowedDomains ?? [],
+        allowedPorts: scope?.allowedPorts ?? [],
       },
     });
-    return verifiedTarget;
+    return target;
+  }
+
+  async configureScope(
+    workspaceId: string,
+    targetId: string,
+    actorId: string,
+    input: TargetScopeInput,
+  ) {
+    const target = await this.prisma.target.findFirst({ where: { id: targetId, workspaceId } });
+    if (!target) throw new NotFoundException("Target does not exist in this workspace.");
+    if (target.status === TargetStatus.SCANNING) {
+      throw new ConflictException("Target scope cannot change while an assessment is running.");
+    }
+    if (target.status === TargetStatus.DISABLED) {
+      throw new ConflictException("A disabled target cannot be reconfigured.");
+    }
+    const scope = normalizeScope(normalizeAssessmentUrl(target.origin), input);
+    const updated = await this.prisma.$transaction(async (transaction) => {
+      await transaction.scopeRule.deleteMany({ where: { workspaceId, targetId } });
+      return transaction.target.update({
+        where: { id: targetId },
+        data: {
+          status: TargetStatus.READY,
+          includeSubdomains: scope.includeSubdomains,
+          allowPrivateNetwork: scope.allowPrivateNetwork,
+          scopeRules: { create: scopeRuleData(workspaceId, scope) },
+        },
+        include: {
+          scopeRules: {
+            where: { enabled: true },
+            orderBy: [{ type: "asc" }, { value: "asc" }],
+          },
+        },
+      });
+    });
+    scopePolicyFromTarget(updated);
+    await this.audit.record({
+      workspaceId,
+      actorId,
+      action: "target.scope_configured",
+      resourceType: "Target",
+      resourceId: targetId,
+      metadata: {
+        allowedDomains: scope.allowedDomains,
+        includeSubdomains: scope.includeSubdomains,
+        allowedPorts: scope.allowedPorts,
+        excludedPaths: scope.excludedPaths,
+        allowPrivateNetwork: scope.allowPrivateNetwork,
+      },
+    });
+    return updated;
+  }
+
+  async disable(workspaceId: string, targetId: string, actorId: string) {
+    const target = await this.prisma.target.findFirst({ where: { id: targetId, workspaceId } });
+    if (!target) throw new NotFoundException("Target does not exist in this workspace.");
+    if (target.status === TargetStatus.SCANNING) {
+      throw new ConflictException("Cancel the running assessment before disabling its target.");
+    }
+    const updated = await this.prisma.target.update({
+      where: { id: targetId },
+      data: { status: TargetStatus.DISABLED, disabledAt: new Date() },
+    });
+    await this.audit.record({
+      workspaceId,
+      actorId,
+      action: "target.disabled",
+      resourceType: "Target",
+      resourceId: targetId,
+    });
+    return updated;
   }
 }

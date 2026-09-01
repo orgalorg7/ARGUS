@@ -15,10 +15,18 @@ export interface HostResolver {
 
 export interface ScopePolicy {
   targetOrigin: string;
+  allowedDomains?: string[];
   includeSubdomains: boolean;
   allowPrivateNetwork: boolean;
   allowedPorts?: number[];
   excludedPathPrefixes?: string[];
+}
+
+export interface PersistedTargetScope {
+  origin: string;
+  includeSubdomains: boolean;
+  allowPrivateNetwork: boolean;
+  scopeRules: Array<{ type: string; value: string; enabled: boolean }>;
 }
 
 export interface ScopeDecision {
@@ -84,6 +92,62 @@ function effectivePort(url: URL): number {
   return url.protocol === "https:" ? 443 : 80;
 }
 
+export function scopePolicyFromTarget(target: PersistedTargetScope): ScopePolicy {
+  const origin = normalizeAssessmentUrl(target.origin);
+  const allowedDomains = [
+    ...new Set(
+      target.scopeRules
+        .filter(({ enabled, type }) => enabled && type === "HOST")
+        .map(({ value }) => normalizeHostname(value)),
+    ),
+  ];
+  const allowedPorts = [
+    ...new Set(
+      target.scopeRules
+        .filter(({ enabled, type }) => enabled && type === "PORT")
+        .map(({ value }) => Number(value))
+        .filter((value) => Number.isInteger(value) && value >= 1 && value <= 65_535),
+    ),
+  ];
+  const excludedPathPrefixes = [
+    ...new Set(
+      target.scopeRules
+        .filter(({ enabled, type }) => enabled && type === "PATH_EXCLUDE")
+        .map(({ value }) => value),
+    ),
+  ];
+  if (allowedDomains.length === 0) {
+    throw new ScopeViolationError(
+      "SCOPE_NOT_CONFIGURED",
+      "At least one allowed domain is required.",
+    );
+  }
+  if (allowedPorts.length === 0) {
+    throw new ScopeViolationError("SCOPE_NOT_CONFIGURED", "At least one allowed port is required.");
+  }
+  const originHostname = normalizeHostname(origin.hostname);
+  if (!allowedDomains.includes(originHostname)) {
+    throw new ScopeViolationError(
+      "SCOPE_NOT_CONFIGURED",
+      "The target origin hostname must be explicitly present in allowed domains.",
+    );
+  }
+  if (!allowedPorts.includes(effectivePort(origin))) {
+    throw new ScopeViolationError(
+      "SCOPE_NOT_CONFIGURED",
+      "The target origin port must be explicitly present in allowed ports.",
+    );
+  }
+  return {
+    targetOrigin: origin.toString(),
+    allowedDomains,
+    includeSubdomains: target.includeSubdomains,
+    allowPrivateNetwork: target.allowPrivateNetwork,
+    allowedPorts,
+    excludedPathPrefixes,
+  };
+}
+
 export function normalizeAssessmentUrl(input: string): URL {
   let parsed: URL;
   try {
@@ -127,6 +191,7 @@ export class ScopeEngine {
     const target = normalizeAssessmentUrl(policy.targetOrigin);
     const hostname = normalizeHostname(url.hostname);
     const targetHostname = normalizeHostname(target.hostname);
+    const allowedDomains = (policy.allowedDomains ?? [targetHostname]).map(normalizeHostname);
 
     if (forbiddenHostnames.has(hostname) && !policy.allowPrivateNetwork) {
       throw new ScopeViolationError(
@@ -136,8 +201,10 @@ export class ScopeEngine {
       );
     }
 
-    const exactHost = hostname === targetHostname;
-    const authorizedSubdomain = policy.includeSubdomains && hostname.endsWith(`.${targetHostname}`);
+    const exactHost = allowedDomains.includes(hostname);
+    const authorizedSubdomain =
+      policy.includeSubdomains &&
+      allowedDomains.some((allowedDomain) => hostname.endsWith(`.${allowedDomain}`));
     if (!exactHost && !authorizedSubdomain) {
       throw new ScopeViolationError(
         "HOST_NOT_AUTHORIZED",

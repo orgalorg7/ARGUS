@@ -169,12 +169,15 @@ const input: ScanReportInput = {
   target: {
     name: "Intentionally vulnerable local fixture",
     origin: decoded.target,
-    status: "VERIFIED",
-    verifiedAt: decoded.generatedAt,
-    authorizationExpiresAt: null,
-    verificationMethod: "Privileged manual approval for internal demo fixture",
+    status: "COMPLETED",
+    scopeConfiguredAt: decoded.generatedAt,
   },
-  scopeRules: [{ type: "HOST", value: new URL(decoded.target).hostname, enabled: true }],
+  scopeRules: [
+    { type: "HOST", value: new URL(decoded.target).hostname, enabled: true },
+    { type: "PORT", value: String(new URL(decoded.target).port || "80"), enabled: true },
+    { type: "INCLUDE_SUBDOMAINS", value: "false", enabled: true },
+    { type: "ALLOW_PRIVATE_NETWORK", value: "true", enabled: true },
+  ],
   config: { profile: "STANDARD", source: "day3 real local scanner artifact" },
   stages: [
     {

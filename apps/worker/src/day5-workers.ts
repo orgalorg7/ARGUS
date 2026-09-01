@@ -114,7 +114,7 @@ async function buildInput(prisma: PrismaClient, payload: ReportPayload): Promise
     where: { id: payload.scanId, workspaceId: payload.workspaceId },
     include: {
       workspace: true,
-      target: { include: { verifications: { orderBy: { createdAt: "desc" } }, scopeRules: true } },
+      target: { include: { scopeRules: true } },
       config: true,
       stages: { orderBy: { createdAt: "asc" } },
       assets: { orderBy: { value: "asc" } },
@@ -145,7 +145,6 @@ async function buildInput(prisma: PrismaClient, payload: ReportPayload): Promise
     where: { workspaceId: payload.workspaceId, scanId: payload.scanId },
     select: { requestMetadata: true },
   });
-  const verification = scan.target.verifications.find(({ status }) => status === "SUCCEEDED");
   const findings: ReportFinding[] = scan.findings.map((finding) => {
     const context = analysisContext(finding.aiAnalyses[0]?.output ?? null);
     return {
@@ -208,15 +207,25 @@ async function buildInput(prisma: PrismaClient, payload: ReportPayload): Promise
       name: scan.target.name,
       origin: scan.target.origin,
       status: scan.target.status,
-      verifiedAt: iso(scan.target.verifiedAt),
-      authorizationExpiresAt: iso(scan.target.authorizationExpiresAt),
-      verificationMethod: verification?.method ?? "No successful verification record",
+      scopeConfiguredAt: scan.target.updatedAt.toISOString(),
     },
-    scopeRules: scan.target.scopeRules.map((rule) => ({
-      type: rule.type,
-      value: rule.value,
-      enabled: rule.enabled,
-    })),
+    scopeRules: [
+      ...scan.target.scopeRules.map((rule) => ({
+        type: rule.type,
+        value: rule.value,
+        enabled: rule.enabled,
+      })),
+      {
+        type: "INCLUDE_SUBDOMAINS",
+        value: scan.target.includeSubdomains ? "true" : "false",
+        enabled: true,
+      },
+      {
+        type: "ALLOW_PRIVATE_NETWORK",
+        value: scan.target.allowPrivateNetwork ? "true" : "false",
+        enabled: true,
+      },
+    ],
     config: configuration,
     stages: scan.stages.map((stage) => ({
       name: stage.name,

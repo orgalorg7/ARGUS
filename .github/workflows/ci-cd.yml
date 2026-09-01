@@ -23,6 +23,20 @@ jobs:
     timeout-minutes: 35
     permissions:
       contents: read
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_DB: aasp
+          POSTGRES_USER: aasp
+          POSTGRES_PASSWORD: ci-migration-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aasp -d aasp"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,6 +58,11 @@ jobs:
 
       - name: Generate Prisma client
         run: pnpm prisma:generate
+
+      - name: Apply database migrations to PostgreSQL 17
+        env:
+          DATABASE_URL: postgresql://aasp:ci-migration-password@127.0.0.1:5432/aasp?schema=public
+        run: pnpm prisma:migrate
 
       - name: Check formatting
         run: pnpm format:check

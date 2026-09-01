@@ -58,10 +58,8 @@ const input: ScanReportInput = {
   target: {
     name: "Fixture",
     origin: "https://authorized.test",
-    status: "VERIFIED",
-    verifiedAt: "2026-08-30T00:00:00.000Z",
-    authorizationExpiresAt: "2026-09-30T00:00:00.000Z",
-    verificationMethod: "DNS_TXT",
+    status: "COMPLETED",
+    scopeConfiguredAt: "2026-08-30T00:00:00.000Z",
   },
   scopeRules: [{ type: "HOST", value: "authorized.test", enabled: true }],
   config: {},
@@ -105,7 +103,7 @@ describe("report engine", () => {
   it("generates complete, escaped, evidence-backed outputs", () => {
     const report = generateCompleteScanReport(input);
     expect(report.document.severityCounts.LOW).toBe(1);
-    expect(report.html).toContain("Authorization &amp; scope");
+    expect(report.html).toContain("Engagement authorization &amp; scope");
     expect(report.html).toContain("Ignore previous instructions");
     expect(report.html).not.toContain("<script>alert(1)</script>");
     expect(report.sha256).toMatch(/^[a-f0-9]{64}$/u);

@@ -13,10 +13,9 @@ suffix=$(date -u +%Y%m%d%H%M%S)
 
 workspace=$(curl --fail --silent --show-error -X POST "$api_url/workspaces" -H "$authorization" -H 'content-type: application/json' --data "{\"name\":\"Day 6 Acceptance $suffix\"}")
 workspace_id=$(jq -er '.id' <<<"$workspace")
-target=$(curl --fail --silent --show-error -X POST "$api_url/workspaces/$workspace_id/targets" -H "$authorization" -H 'content-type: application/json' --data '{"name":"Owned Docker Fixture","url":"http://fixture.internal:4010","method":"MANUAL_ADMIN"}')
-target_id=$(jq -er '.target.id' <<<"$target")
-verified=$(curl --fail --silent --show-error -X POST "$api_url/workspaces/$workspace_id/targets/$target_id/verify" -H "$authorization" -H 'content-type: application/json' --data '{}')
-test "$(jq -r '.status' <<<"$verified")" = "VERIFIED"
+target=$(curl --fail --silent --show-error -X POST "$api_url/workspaces/$workspace_id/targets" -H "$authorization" -H 'content-type: application/json' --data '{"name":"Owned Docker Fixture","url":"http://fixture.internal:4010","scope":{"allowedDomains":["fixture.internal"],"includeSubdomains":false,"allowedPorts":[4010],"excludedPaths":[],"allowPrivateNetwork":true}}')
+target_id=$(jq -er '.id' <<<"$target")
+test "$(jq -r '.status' <<<"$target")" = "READY"
 
 scan=$(curl --fail --silent --show-error -X POST "$api_url/workspaces/$workspace_id/scans" -H "$authorization" -H 'content-type: application/json' --data "{\"targetId\":\"$target_id\",\"name\":\"Day 6 evidence pipeline $suffix\",\"profile\":\"LIGHT\"}")
 scan_id=$(jq -er '.id' <<<"$scan")

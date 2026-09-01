@@ -15,7 +15,9 @@ export default async function NewScan({
   const workspaceId = (await searchParams).workspaceId;
   if (!workspaceId) return null;
   const all = await platformGet<Target[]>(`workspaces/${workspaceId}/targets`);
-  const targets = all.filter(({ status }) => status === "VERIFIED");
+  const targets = all.filter(({ status }) =>
+    ["READY", "COMPLETED", "FAILED", "CANCELLED"].includes(status),
+  );
   return (
     <AppShell workspaceId={workspaceId}>
       <div className="page-head">
@@ -31,7 +33,7 @@ export default async function NewScan({
       {targets.length ? (
         <ScanForm workspaceId={workspaceId} targets={targets} />
       ) : (
-        <p className="empty">No currently verified target is available.</p>
+        <p className="empty">No enabled target with a valid saved scope is available.</p>
       )}
     </AppShell>
   );

@@ -4,22 +4,32 @@ export const workspaceRoleSchema = z.enum(["OWNER", "ADMIN", "ANALYST", "VIEWER"
 export type WorkspaceRole = z.infer<typeof workspaceRoleSchema>;
 
 export const targetStatusSchema = z.enum([
-  "PENDING_VERIFICATION",
-  "VERIFIED",
-  "REJECTED",
+  "DRAFT",
+  "READY",
+  "SCANNING",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
   "DISABLED",
 ]);
 export type TargetStatus = z.infer<typeof targetStatusSchema>;
 
-export const verificationMethodSchema = z.enum(["DNS_TXT", "WELL_KNOWN", "MANUAL_ADMIN"]);
-export type VerificationMethod = z.infer<typeof verificationMethodSchema>;
+export const targetScopeSchema = z
+  .object({
+    allowedDomains: z.array(z.string().trim().min(1).max(253)).min(1).max(50),
+    includeSubdomains: z.boolean(),
+    allowedPorts: z.array(z.number().int().min(1).max(65_535)).min(1).max(32),
+    excludedPaths: z.array(z.string().trim().min(1).max(2_048)).max(200),
+    allowPrivateNetwork: z.boolean().default(false),
+  })
+  .strict();
+export type TargetScopeInput = z.infer<typeof targetScopeSchema>;
 
 export const scanProfileSchema = z.enum(["LIGHT", "STANDARD", "DEEP_SAFE"]);
 export type ScanProfile = z.infer<typeof scanProfileSchema>;
 
 export const scanStateSchema = z.enum([
   "CREATED",
-  "WAITING_FOR_TARGET_VERIFICATION",
   "AUTHORIZED",
   "QUEUED",
   "VALIDATING_SCOPE",

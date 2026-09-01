@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient, ScanState as ScanStateType } from "@aasp/database";
-import { JobStatus, ScanState, StageStatus } from "@aasp/database";
+import { JobStatus, ScanState, StageStatus, TargetStatus } from "@aasp/database";
 import { discoverApiEndpoints } from "@aasp/api-discovery";
 import {
   AsynchronousCrawler,
@@ -10,8 +10,12 @@ import {
 } from "@aasp/crawler";
 import { EvidenceEngine } from "@aasp/evidence-engine";
 import { logger } from "@aasp/logger";
-import { ScopeEngine, ScopedHttpClient, ScopeViolationError } from "@aasp/scope-engine";
-import { assertCurrentTargetAuthorization } from "@aasp/security-core";
+import {
+  ScopeEngine,
+  ScopedHttpClient,
+  ScopeViolationError,
+  scopePolicyFromTarget,
+} from "@aasp/scope-engine";
 import { fingerprintTechnologies, type TechnologyCandidate } from "@aasp/technology-fingerprinter";
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
@@ -76,23 +80,22 @@ function failureSummary(result: CrawlResult): Prisma.InputJsonValue {
 async function loadScan(prisma: PrismaClient, workspaceId: string, scanId: string) {
   const scan = await prisma.scan.findFirst({
     where: { id: scanId, workspaceId },
-    include: { target: true, config: true },
+    include: {
+      target: { include: { scopeRules: { where: { enabled: true } } } },
+      config: true,
+    },
   });
   if (!scan?.config)
     throw new Error("Persisted scan configuration was not found in its workspace.");
-  assertCurrentTargetAuthorization(scan.target);
+  if (scan.target.status !== TargetStatus.SCANNING) {
+    throw new Error(`Target is not in SCANNING state; observed ${scan.target.status}.`);
+  }
+  scopePolicyFromTarget(scan.target);
   return { ...scan, config: scan.config };
 }
 
 function policyFor(scan: Awaited<ReturnType<typeof loadScan>>) {
-  return {
-    targetOrigin: scan.target.origin,
-    includeSubdomains: scan.config.includeSubdomains,
-    allowPrivateNetwork: scan.target.allowPrivateNetwork,
-    allowedPorts: [
-      scan.target.normalizedPort ?? (scan.target.origin.startsWith("https:") ? 443 : 80),
-    ],
-  };
+  return scopePolicyFromTarget(scan.target);
 }
 
 async function markJobRunning<T extends StagePayload>(

@@ -11,10 +11,11 @@ export default async function NewTarget({
     <AppShell workspaceId={workspaceId}>
       <div className="page-head">
         <div>
-          <p className="eyebrow">Explicit authorization</p>
+          <p className="eyebrow">Engagement scope</p>
           <h1>Register a target</h1>
           <p className="lede">
-            The target remains inactive until its challenge is successfully verified.
+            Record the target and its authorized technical boundary. No domain ownership challenge
+            is performed.
           </p>
         </div>
       </div>

@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { assertScanTransition, InvalidScanTransitionError } from "@aasp/security-core";
 
 describe("scan state machine", () => {
-  it("accepts the persisted authorized-to-queued transition", () => {
-    expect(() => assertScanTransition("AUTHORIZED", "QUEUED")).not.toThrow();
+  it("accepts an immediate created-to-queued start transition", () => {
+    expect(() => assertScanTransition("CREATED", "QUEUED")).not.toThrow();
   });
 
-  it("rejects skipping authorization and discovery", () => {
+  it("rejects skipping queueing and discovery", () => {
     expect(() => assertScanTransition("CREATED", "CRAWLING")).toThrowError(
       InvalidScanTransitionError,
     );

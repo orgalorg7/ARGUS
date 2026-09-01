@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AppShell } from "../../components/app-shell";
-import { VerifyTarget } from "../../components/verify-target";
+import { ConfigureScope } from "../../components/configure-scope";
 import { platformGet, workspaceHref } from "../../lib/platform";
 
 interface Target {
@@ -8,8 +8,8 @@ interface Target {
   name: string;
   origin: string;
   status: string;
-  authorizationExpiresAt: string | null;
-  verifications: Array<{ method: string; status: string }>;
+  includeSubdomains: boolean;
+  scopeRules: Array<{ type: string; value: string }>;
 }
 export default async function TargetsPage({
   searchParams,
@@ -39,12 +39,18 @@ export default async function TargetsPage({
               <span className={`badge status-${target.status}`}>
                 {target.status.replaceAll("_", " ")}
               </span>
+              {target.scopeRules.length > 0 && (
+                <p className="mono">
+                  {target.scopeRules.map(({ type, value }) => `${type}:${value}`).join(" · ")}
+                  {target.includeSubdomains ? " · SUBDOMAINS:INCLUDED" : ""}
+                </p>
+              )}
             </div>
-            {target.status === "PENDING_VERIFICATION" && (
-              <VerifyTarget
+            {target.status === "DRAFT" && (
+              <ConfigureScope
                 workspaceId={workspaceId}
                 targetId={target.id}
-                manual={target.verifications[0]?.method === "MANUAL_ADMIN"}
+                origin={target.origin}
               />
             )}
           </article>

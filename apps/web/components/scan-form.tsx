@@ -32,7 +32,6 @@ export function ScanForm({
               concurrency: Number(data.get("concurrency")),
               timeoutMs: Number(data.get("timeoutMs")),
               followRedirects: data.get("followRedirects") === "on",
-              includeSubdomains: data.get("includeSubdomains") === "on",
             },
           };
           const response = await fetch(`/api/platform/workspaces/${workspaceId}/scans`, {
@@ -58,7 +57,7 @@ export function ScanForm({
         <input name="name" defaultValue="Authorized web assessment" required />
       </label>
       <label>
-        Verified target
+        Scope-ready target
         <select name="targetId" required>
           {targets.map((target) => (
             <option key={target.id} value={target.id}>
@@ -103,9 +102,6 @@ export function ScanForm({
       </div>
       <label className="check">
         <input name="followRedirects" type="checkbox" defaultChecked /> Follow in-scope redirects
-      </label>
-      <label className="check">
-        <input name="includeSubdomains" type="checkbox" /> Include verified subdomains
       </label>
       <button className="button" type="submit">
         Create assessment

@@ -70,12 +70,12 @@ export function LiveScan({
     <section>
       <div className="status-line">
         <span className={`badge status-${scan.state}`}>{scan.state.replaceAll("_", " ")}</span>
-        {scan.state === "AUTHORIZED" && (
+        {scan.state === "CREATED" && (
           <button className="button danger-action" onClick={() => void start()}>
             Start security assessment
           </button>
         )}
-        {!terminal.has(scan.state) && scan.state !== "AUTHORIZED" && (
+        {!terminal.has(scan.state) && scan.state !== "CREATED" && (
           <button className="button secondary" onClick={() => void cancel()}>
             Request cancellation
           </button>

@@ -50,7 +50,7 @@ WORKSPACE
 REGISTER TARGET
   |
   v
-VERIFY AUTHORIZATION
+CONFIGURE AUTHORIZED SCOPE
   |
   v
 ENTER AUTHORIZED URL
@@ -106,7 +106,7 @@ Do not spend the week designing abstractions that do not contribute to the final
 Priority order:
 
 ```text
-1. Authorization + Scope Safety
+1. Engagement Authorization + Scope Safety
 2. Real Scan Pipeline
 3. Evidence Integrity
 4. Finding Normalization
@@ -129,36 +129,33 @@ Never sacrifice authorization, evidence integrity, or scan correctness to add co
 
 ---
 
-# 3. NON-NEGOTIABLE AUTHORIZATION POLICY
+# 3. NON-NEGOTIABLE AUTHORIZATION AND SCOPE POLICY
 
-The platform must only assess explicitly authorized targets.
+The platform must only assess targets authorized through the organization's existing business/security engagement process before target entry. The platform does not re-prove technical ownership and must not require DNS TXT challenges, well-known files, verification tokens, email verification, or domain ownership challenges.
 
-Implement authorization as an architectural control, not a warning banner.
+The platform's architectural responsibility is enforcement of the configured assessment scope.
 
 Target states:
 
 ```text
-PENDING_VERIFICATION
-VERIFIED
-REJECTED
+DRAFT
+READY
+SCANNING
+COMPLETED
+FAILED
+CANCELLED
 DISABLED
 ```
 
-No active assessment may begin unless:
+The required flow is:
 
 ```text
-target.status == VERIFIED
+CREATE TARGET -> CONFIGURE SCOPE -> READY -> START SCAN
 ```
 
-Support at minimum:
+An active assessment may begin when the target exists, is enabled, has valid persisted scope configuration, and the user has permission to start scans. No technical ownership-verification record belongs in the execution path.
 
-- DNS TXT verification.
-- `/.well-known/security-assessment-verification` token verification.
-- Privileged administrator approval for local/internal fixtures.
-
-Every outbound request must pass the scope engine.
-
-Do not validate scope only when the scan starts.
+Every outbound request must pass the scope engine. Do not validate scope only when the scan starts.
 
 Required invariant:
 
@@ -834,7 +831,6 @@ Workspace
 WorkspaceMember
 Role
 Target
-TargetVerification
 ScopeRule
 Scan
 ScanConfig
@@ -903,7 +899,6 @@ Implement explicit states:
 
 ```text
 CREATED
-WAITING_FOR_TARGET_VERIFICATION
 AUTHORIZED
 QUEUED
 VALIDATING_SCOPE
@@ -1682,7 +1677,7 @@ Never claim tests passed unless they were executed.
 Mandatory test cases:
 
 ```text
-unverified target cannot scan
+target without valid scope cannot scan
 redirect outside scope blocked
 private IP blocked by default
 loopback blocked by default
@@ -1712,7 +1707,7 @@ Deliver:
 - workspace
 - RBAC
 - targets
-- target verification
+- target scope configuration
 - scope engine
 - scan state machine
 - worker foundation
@@ -2041,8 +2036,8 @@ The project is DONE only when this complete flow works:
 2. Sign in
 3. Create/select workspace
 4. Register local authorized test target
-5. Verify ownership/authorization
-6. Enter target URL
+5. Configure and save the authorized scope
+6. Confirm the target is `READY`
 7. Start assessment
 8. Scope engine validates target
 9. Discovery runs

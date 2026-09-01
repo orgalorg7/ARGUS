@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient, ScanState as ScanStateType } from "@aasp/database";
-import { JobStatus, ScanState, StageStatus } from "@aasp/database";
+import { JobStatus, ScanState, StageStatus, TargetStatus } from "@aasp/database";
 import { EvidenceEngine } from "@aasp/evidence-engine";
 import { logger } from "@aasp/logger";
 import { AuthenticationSurfaceScanner } from "@aasp/scanner-auth-surface";
@@ -10,9 +10,8 @@ import { HttpSecurityScanner } from "@aasp/scanner-http";
 import { runPassiveAdapters, type HttpExchange } from "@aasp/scanner-integrations";
 import { MisconfigurationScanner } from "@aasp/scanner-misconfiguration";
 import { analyzeTls } from "@aasp/scanner-tls";
-import { ScopeEngine, ScopedHttpClient } from "@aasp/scope-engine";
+import { ScopeEngine, ScopedHttpClient, scopePolicyFromTarget } from "@aasp/scope-engine";
 import type { ScannerObservationInput } from "@aasp/schemas";
-import { assertCurrentTargetAuthorization } from "@aasp/security-core";
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
 
@@ -47,22 +46,21 @@ function jsonValue(value: unknown): Prisma.InputJsonValue {
 async function loadScan(prisma: PrismaClient, payload: StagePayload) {
   const scan = await prisma.scan.findFirst({
     where: { id: payload.scanId, workspaceId: payload.workspaceId },
-    include: { target: true, config: true },
+    include: {
+      target: { include: { scopeRules: { where: { enabled: true } } } },
+      config: true,
+    },
   });
   if (!scan?.config) throw new Error("Persisted scan configuration was not found.");
-  assertCurrentTargetAuthorization(scan.target);
+  if (scan.target.status !== TargetStatus.SCANNING) {
+    throw new Error(`Target is not in SCANNING state; observed ${scan.target.status}.`);
+  }
+  scopePolicyFromTarget(scan.target);
   return { ...scan, config: scan.config };
 }
 
 function scopePolicy(scan: Awaited<ReturnType<typeof loadScan>>) {
-  return {
-    targetOrigin: scan.target.origin,
-    includeSubdomains: scan.config.includeSubdomains,
-    allowPrivateNetwork: scan.target.allowPrivateNetwork,
-    allowedPorts: [
-      scan.target.normalizedPort ?? (scan.target.origin.startsWith("https:") ? 443 : 80),
-    ],
-  };
+  return scopePolicyFromTarget(scan.target);
 }
 
 function recordValue(value: Prisma.JsonValue): Record<string, unknown> {

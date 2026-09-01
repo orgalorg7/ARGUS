@@ -7,6 +7,7 @@ import {
   ScopeViolationError,
   classifyAddress,
   normalizeAssessmentUrl,
+  scopePolicyFromTarget,
   type HostResolver,
   type ResolvedAddress,
 } from "@aasp/scope-engine";
@@ -87,6 +88,60 @@ describe("scope engine security boundary", () => {
         allowPrivateNetwork: false,
       }),
     ).rejects.toMatchObject({ reason: "HOST_NOT_AUTHORIZED" });
+  });
+
+  it("allows only explicitly configured domains and their opted-in subdomains", async () => {
+    const engine = new ScopeEngine(new SequenceResolver([[publicAddress], [publicAddress]]));
+    const policy = {
+      targetOrigin: "https://example.com",
+      allowedDomains: ["example.com", "api.partner.test"],
+      includeSubdomains: true,
+      allowPrivateNetwork: false,
+      allowedPorts: [443],
+    };
+    await expect(
+      engine.assertAllowed("https://api.partner.test/v1", policy),
+    ).resolves.toBeDefined();
+    await expect(engine.assertAllowed("https://outside.test/", policy)).rejects.toMatchObject({
+      reason: "HOST_NOT_AUTHORIZED",
+    });
+  });
+
+  it("builds the request policy only from persisted enabled scope rules", () => {
+    expect(
+      scopePolicyFromTarget({
+        origin: "https://example.com",
+        includeSubdomains: true,
+        allowPrivateNetwork: false,
+        scopeRules: [
+          { type: "HOST", value: "example.com", enabled: true },
+          { type: "HOST", value: "ignored.test", enabled: false },
+          { type: "PORT", value: "443", enabled: true },
+          { type: "PATH_EXCLUDE", value: "/excluded", enabled: true },
+        ],
+      }),
+    ).toEqual({
+      targetOrigin: "https://example.com/",
+      allowedDomains: ["example.com"],
+      includeSubdomains: true,
+      allowPrivateNetwork: false,
+      allowedPorts: [443],
+      excludedPathPrefixes: ["/excluded"],
+    });
+  });
+
+  it("rejects persisted scope that omits the target origin", () => {
+    expect(() =>
+      scopePolicyFromTarget({
+        origin: "https://example.com",
+        includeSubdomains: false,
+        allowPrivateNetwork: false,
+        scopeRules: [
+          { type: "HOST", value: "other.test", enabled: true },
+          { type: "PORT", value: "443", enabled: true },
+        ],
+      }),
+    ).toThrowError(ScopeViolationError);
   });
 
   it("blocks redirect destinations outside the authorized host before transport", async () => {

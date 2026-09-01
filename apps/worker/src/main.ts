@@ -1,9 +1,15 @@
 import { hostname } from "node:os";
 import { randomUUID } from "node:crypto";
-import { JobStatus, PrismaClient, ScanState, StageStatus, WorkerStatus } from "@aasp/database";
+import {
+  JobStatus,
+  PrismaClient,
+  ScanState,
+  StageStatus,
+  TargetStatus,
+  WorkerStatus,
+} from "@aasp/database";
 import { logger } from "@aasp/logger";
-import { ScopeEngine } from "@aasp/scope-engine";
-import { assertCurrentTargetAuthorization } from "@aasp/security-core";
+import { ScopeEngine, scopePolicyFromTarget } from "@aasp/scope-engine";
 import { Queue, Worker } from "bullmq";
 import type { Job } from "bullmq";
 import { Redis } from "ioredis";
@@ -92,7 +98,10 @@ async function processOrchestration(
   const context = { workspaceId, scanId, jobId: persistedJobId, workerId };
   const scan = await prisma.scan.findFirst({
     where: { id: scanId, workspaceId },
-    include: { target: true, config: true },
+    include: {
+      target: { include: { scopeRules: { where: { enabled: true } } } },
+      config: true,
+    },
   });
   if (!scan || !scan.config)
     throw new Error("Persisted scan/config was not found in its workspace.");
@@ -102,11 +111,10 @@ async function processOrchestration(
   }
   if (scan.state !== ScanState.QUEUED)
     throw new Error(`Expected QUEUED scan, observed ${scan.state}.`);
-  try {
-    assertCurrentTargetAuthorization(scan.target);
-  } catch {
-    throw new Error("Target authorization is not valid at worker execution time.");
+  if (scan.target.status !== TargetStatus.SCANNING) {
+    throw new Error(`Target is not reserved for scanning; observed ${scan.target.status}.`);
   }
+  const scopePolicy = scopePolicyFromTarget(scan.target);
 
   await prisma.$transaction([
     prisma.scan.update({
@@ -128,16 +136,8 @@ async function processOrchestration(
     }),
   ]);
 
-  const allowedPorts = [
-    scan.target.normalizedPort ?? (scan.target.origin.startsWith("https:") ? 443 : 80),
-  ];
   const engine = new ScopeEngine();
-  const decision = await engine.assertAllowed(scan.target.origin, {
-    targetOrigin: scan.target.origin,
-    includeSubdomains: scan.config.includeSubdomains,
-    allowPrivateNetwork: scan.target.allowPrivateNetwork,
-    allowedPorts,
-  });
+  const decision = await engine.assertAllowed(scan.target.origin, scopePolicy);
   const discoveryIdempotencyKey = `discover:${scanId}:v1`;
   const discoveryJob = await prisma.$transaction(async (transaction) => {
     await transaction.scanStage.update({
@@ -190,7 +190,7 @@ async function processOrchestration(
       },
     }),
   ]);
-  logger.info("Authorization and scope validation completed; discovery job queued.", context);
+  logger.info("Configured scope validation completed; discovery job queued.", context);
   return { discoveryJobId: discoveryJob.id };
 }
 

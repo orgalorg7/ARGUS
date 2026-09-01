@@ -1,8 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
 const port = Number(process.env["FIXTURE_PORT"] ?? "4010");
-const verificationToken =
-  process.env["ASSESSMENT_VERIFICATION_TOKEN"] ?? "fixture-runtime-token-not-for-production";
 
 function send(
   response: ServerResponse,
@@ -134,10 +132,6 @@ const server = createServer((request, response) => {
       "text/plain",
       "Contact: mailto:security@fixture.internal\nPolicy: http://fixture.internal:4010/security-policy\n",
     );
-    return;
-  }
-  if (url.pathname === "/.well-known/security-assessment-verification") {
-    send(response, 200, "text/plain", verificationToken);
     return;
   }
   if (url.pathname === "/openapi.json" || url.pathname === "/swagger.json") {

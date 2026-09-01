@@ -1,20 +1,29 @@
-# Target Authorization
+# Engagement Authorization and Target Scope
 
-## Methods
+Authorization to assess a target is established through the organization's business and security engagement process before the target is entered into the platform. The platform does not attempt to prove domain ownership and does not use DNS TXT challenges, well-known files, email verification, or verification tokens.
 
-- `DNS_TXT`: publish `aasp-verification=<token>` at `_security-assessment.<hostname>`.
-- `WELL_KNOWN`: serve the exact token as plain text at `/.well-known/security-assessment-verification`.
-- `MANUAL_ADMIN`: a system administrator may approve only a local/internal fixture hostname. This path is intended for owned demo fixtures and records the approving user.
+## Target lifecycle
 
-The registration response displays the random token once. Only its SHA-256 digest and a short non-secret hint are persisted. Challenges expire after 24 hours. Successful target authorization expires after 30 days and must be renewed before another assessment starts.
+```text
+CREATE TARGET -> CONFIGURE SCOPE -> READY -> START SCAN
+```
 
-## Enforcement points
+A target without a valid scope remains `DRAFT`. Saving a valid scope moves it to `READY`. During execution it is `SCANNING`; terminal target states are `COMPLETED`, `FAILED`, or `CANCELLED`. `DISABLED` targets cannot be scanned.
 
-1. Target registration creates `PENDING_VERIFICATION` state.
-2. Verification validates the selected proof and stores its attempt/audit record.
-3. Scan creation requires current `VERIFIED` authorization.
-4. Scan start rechecks authorization.
-5. Worker execution rechecks authorization.
-6. Every outbound URL is checked by the scope engine immediately before its socket is opened.
+The saved scope contains:
 
-Verification itself is narrowly bounded: DNS and well-known verification operate only against the exact registered public hostname and cannot follow redirects. Private/loopback targets cannot use these network verification paths.
+- one or more exact allowed domains, including the target origin hostname;
+- whether dot-delimited subdomains of those domains are allowed;
+- allowed TCP ports, including the target origin's effective port;
+- excluded absolute paths; and
+- an explicit private-network allowance, disabled by default.
+
+## Scan-start rule
+
+The API starts a scan only when the target exists in the caller's workspace, is enabled and not already scanning, has a valid persisted scope, and the caller has a role permitted to run assessments. Target reservation and scan queueing occur atomically so concurrent starts cannot scan the same target simultaneously.
+
+## Hard network boundary
+
+Every outbound HTTP operation is routed through the scope engine immediately before transport. URL scheme, normalized hostname, effective port, path exclusions, resolved addresses, DNS pinning, and redirect destinations are checked. A redirect to another domain is blocked unless that domain is explicitly included in the persisted scope.
+
+Removing technical ownership verification does not authorize unrestricted scanning and does not weaken SSRF, private-address, DNS-rebinding, redirect-escape, or hostname-confusion defenses.

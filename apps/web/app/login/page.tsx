@@ -6,7 +6,7 @@ export default function LoginPage() {
       <section className="auth-panel" aria-labelledby="login-title">
         <p className="eyebrow">Authorized access only</p>
         <h1 id="login-title">Assessment console</h1>
-        <p className="lede">Sign in to manage verified targets and evidence-backed assessments.</p>
+        <p className="lede">Sign in to manage scoped targets and evidence-backed assessments.</p>
         <LoginForm />
       </section>
     </main>

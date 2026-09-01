@@ -4,7 +4,7 @@
 
 `.github/workflows/ci-cd.yml` runs for pull requests, pushes to `main`, version tags, and manual dispatches.
 
-The quality job installs the lockfile exactly, generates Prisma, checks formatting and lint, typechecks every workspace package, runs the complete Vitest suite, builds the monorepo, audits production dependencies, and validates both Compose configurations. CodeQL runs independently with no application secrets. Private repositories without GitHub Code Security run the analysis without attempting an unsupported SARIF upload. After code scanning is enabled, set the repository variable `CODEQL_UPLOAD_ENABLED=true` to publish results into GitHub's Security tab.
+The quality job installs the lockfile exactly, generates Prisma, applies all migrations to a clean PostgreSQL 17 service, checks formatting and lint, typechecks every workspace package, runs the complete Vitest suite, builds the monorepo, audits production dependencies, and validates both Compose configurations. CodeQL runs independently with no application secrets. Private repositories without GitHub Code Security run the analysis without attempting an unsupported SARIF upload. After code scanning is enabled, set the repository variable `CODEQL_UPLOAD_ENABLED=true` to publish results into GitHub's Security tab.
 
 After quality and CodeQL succeed, Docker Buildx builds `docker/Dockerfile.platform`. Pull requests build without publishing. Pushes to `main` and version tags publish an SBOM- and provenance-bearing image to:
 

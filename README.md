@@ -4,7 +4,7 @@ Production-oriented MVP implementation for controlled, evidence-backed assessmen
 
 ## Current delivery state
 
-Days 1 through 7 are implemented: monorepo tooling, Prisma data model and migration, authentication/RBAC, three target authorization methods, target-specific scope policy, SSRF/DNS-rebinding/redirect defenses, persisted BullMQ orchestration, scope-guarded discovery, evidence persistence, deterministic scanners, finding correlation, evidence-gated Qwen integration, professional reports, the complete dashboard, cancellation, owned fixtures, hardened containers, clean-install acceptance, tenant-isolation acceptance, and notebooks 00-11.
+Days 1 through 7 are implemented: monorepo tooling, Prisma data model and migrations, authentication/RBAC, target-specific scope configuration, SSRF/DNS-rebinding/redirect defenses, persisted BullMQ orchestration, scope-guarded discovery, evidence persistence, deterministic scanners, finding correlation, evidence-gated Qwen integration, professional reports, the complete dashboard, cancellation, owned fixtures, hardened containers, clean-install acceptance, tenant-isolation acceptance, and notebooks 00-11.
 
 The deterministic authorized pipeline and report path run end to end. With no Qwen provider configured, AI analysis is explicitly degraded and reports use preserved deterministic findings. A configured but temporarily unreachable provider pauses at `AI_ANALYSIS_WAITING_FOR_PROVIDER`. A validated Qwen-backed run remains outstanding until Colab/GPU is connected; no model output is synthesized.
 
@@ -62,15 +62,16 @@ pnpm lint
 pnpm build
 ```
 
-## Authorized fixture flow
+## Scope-controlled assessment flow
 
 1. Sign in and create a workspace.
-2. Use `POST /api/workspaces/:workspaceId/targets` with `MANUAL_ADMIN` for an owned local/internal fixture, or use DNS TXT/well-known proof for a public authorized hostname.
-3. Complete `POST /api/workspaces/:workspaceId/targets/:targetId/verify`.
-4. Create a scan with `POST /api/workspaces/:workspaceId/scans`.
-5. Start it with `POST /api/workspaces/:workspaceId/scans/:scanId/start`.
-6. Observe persisted discovery, crawling, analysis, normalization, correlation, Qwen, and report stages.
-7. Retrieve correlated findings and open the complete and per-finding reports. Without a provider, reports explicitly record degraded AI coverage.
+2. Register a target and save its allowed domains, ports, subdomain policy, excluded paths, and private-network policy. A valid saved scope moves the target to `READY`; no external ownership challenge is performed.
+3. Create a scan with `POST /api/workspaces/:workspaceId/scans`.
+4. Start it with `POST /api/workspaces/:workspaceId/scans/:scanId/start`.
+5. Observe persisted discovery, crawling, analysis, normalization, correlation, Qwen, and report stages.
+6. Retrieve correlated findings and open the complete and per-finding reports. Without a provider, reports explicitly record degraded AI coverage.
+
+Authorization to assess the target must already exist through the organization's engagement process. The platform enforces the saved scope before every outbound request and blocks redirects to destinations outside it.
 
 The standalone Day 2 crawler demonstration can be run without PostgreSQL/Redis:
 

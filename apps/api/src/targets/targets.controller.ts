@@ -1,12 +1,54 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
-import { VerificationMethod, WorkspaceRole } from "@aasp/database";
-import { IsEnum, IsOptional, IsString, IsUrl, Length } from "class-validator";
+import { Body, Controller, Get, Param, Post, Put, UseGuards } from "@nestjs/common";
+import { WorkspaceRole } from "@aasp/database";
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Length,
+  Max,
+  Min,
+  ValidateNested,
+} from "class-validator";
+import { Type } from "class-transformer";
 import { CurrentUser } from "../auth/current-user.decorator.js";
 import type { AuthenticatedUser } from "../auth/auth.types.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
 import { WorkspaceRoles } from "../rbac/roles.decorator.js";
 import { WorkspaceRbacGuard } from "../rbac/workspace-rbac.guard.js";
 import { TargetsService } from "./targets.service.js";
+
+class TargetScopeDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  allowedDomains!: string[];
+
+  @IsBoolean()
+  includeSubdomains!: boolean;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(32)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(65_535, { each: true })
+  allowedPorts!: number[];
+
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  excludedPaths!: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  allowPrivateNetwork?: boolean;
+}
 
 class CreateTargetDto {
   @IsString()
@@ -16,14 +58,10 @@ class CreateTargetDto {
   @IsUrl({ require_protocol: true, protocols: ["http", "https"] })
   url!: string;
 
-  @IsEnum(VerificationMethod)
-  method!: VerificationMethod;
-}
-
-class VerifyTargetDto {
   @IsOptional()
-  @IsString()
-  token?: string;
+  @ValidateNested()
+  @Type(() => TargetScopeDto)
+  scope?: TargetScopeDto;
 }
 
 @Controller("workspaces/:workspaceId/targets")
@@ -49,17 +87,44 @@ export class TargetsController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() input: CreateTargetDto,
   ) {
-    return this.targets.create(workspaceId, user.id, input);
+    return this.targets.create(workspaceId, user.id, {
+      name: input.name,
+      url: input.url,
+      ...(input.scope
+        ? {
+            scope: {
+              allowedDomains: input.scope.allowedDomains,
+              includeSubdomains: input.scope.includeSubdomains,
+              allowedPorts: input.scope.allowedPorts,
+              excludedPaths: input.scope.excludedPaths,
+              allowPrivateNetwork: input.scope.allowPrivateNetwork ?? false,
+            },
+          }
+        : {}),
+    });
   }
 
-  @Post(":targetId/verify")
+  @Put(":targetId/scope")
   @WorkspaceRoles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.ANALYST)
-  verify(
+  configureScope(
     @Param("workspaceId") workspaceId: string,
     @Param("targetId") targetId: string,
     @CurrentUser() user: AuthenticatedUser,
-    @Body() input: VerifyTargetDto,
+    @Body() input: TargetScopeDto,
   ) {
-    return this.targets.verify(workspaceId, targetId, user, input.token);
+    return this.targets.configureScope(workspaceId, targetId, user.id, {
+      ...input,
+      allowPrivateNetwork: input.allowPrivateNetwork ?? false,
+    });
+  }
+
+  @Post(":targetId/disable")
+  @WorkspaceRoles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
+  disable(
+    @Param("workspaceId") workspaceId: string,
+    @Param("targetId") targetId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.targets.disable(workspaceId, targetId, user.id);
   }
 }

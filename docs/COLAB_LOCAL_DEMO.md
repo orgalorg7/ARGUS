@@ -96,8 +96,8 @@ The launcher then:
 3. checks Qwen health, authentication, and exact model identity from the host;
 4. builds and starts PostgreSQL, Redis, API, web, worker, and the owned fixture;
 5. checks Qwen connectivity from inside the Docker worker;
-6. creates a workspace and privileged-approved local fixture target;
-7. persists `VERIFIED` authorization;
+6. creates a workspace and an owned local fixture target with an explicit private-network scope;
+7. persists the target as `READY` after validating that scope;
 8. starts a real `LIGHT` scan;
 9. prints only real persisted state changes;
 10. requires evidence-backed findings;

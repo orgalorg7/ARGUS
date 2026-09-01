@@ -15,23 +15,13 @@ enum WorkspaceRole {
 }
 
 enum TargetStatus {
-  PENDING_VERIFICATION
-  VERIFIED
-  REJECTED
-  DISABLED
-}
-
-enum VerificationMethod {
-  DNS_TXT
-  WELL_KNOWN
-  MANUAL_ADMIN
-}
-
-enum VerificationStatus {
-  PENDING
-  SUCCEEDED
+  DRAFT
+  READY
+  SCANNING
+  COMPLETED
   FAILED
-  EXPIRED
+  CANCELLED
+  DISABLED
 }
 
 enum ScopeRuleType {
@@ -51,7 +41,6 @@ enum ScanProfile {
 
 enum ScanState {
   CREATED
-  WAITING_FOR_TARGET_VERIFICATION
   AUTHORIZED
   QUEUED
   VALIDATING_SCOPE
@@ -203,48 +192,26 @@ model WorkspaceMember {
 }
 
 model Target {
-  id                     String               @id @default(cuid())
-  workspaceId            String
-  name                   String
-  origin                 String
-  normalizedHostname     String
-  normalizedPort         Int?
-  status                 TargetStatus         @default(PENDING_VERIFICATION)
-  allowPrivateNetwork    Boolean              @default(false)
-  authorizationExpiresAt DateTime?
-  createdById            String
-  verifiedAt             DateTime?
-  disabledAt             DateTime?
-  createdAt              DateTime             @default(now())
-  updatedAt              DateTime             @updatedAt
-  workspace              Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy              User                 @relation("TargetCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  verifications          TargetVerification[]
-  scopeRules             ScopeRule[]
-  scans                  Scan[]
+  id                  String       @id @default(cuid())
+  workspaceId         String
+  name                String
+  origin              String
+  normalizedHostname  String
+  normalizedPort      Int?
+  status              TargetStatus @default(DRAFT)
+  includeSubdomains   Boolean      @default(false)
+  allowPrivateNetwork Boolean      @default(false)
+  createdById         String
+  disabledAt          DateTime?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  workspace           Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy           User         @relation("TargetCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  scopeRules          ScopeRule[]
+  scans               Scan[]
 
   @@unique([workspaceId, origin])
   @@index([workspaceId, status])
-}
-
-model TargetVerification {
-  id             String             @id @default(cuid())
-  workspaceId    String
-  targetId       String
-  method         VerificationMethod
-  status         VerificationStatus @default(PENDING)
-  tokenHash      String
-  tokenHint      String
-  attemptCount   Int                @default(0)
-  lastAttemptAt  DateTime?
-  verifiedAt     DateTime?
-  expiresAt      DateTime
-  failureReason  String?
-  verifierUserId String?
-  createdAt      DateTime           @default(now())
-  target         Target             @relation(fields: [targetId], references: [id], onDelete: Cascade)
-
-  @@index([workspaceId, targetId, status])
 }
 
 model ScopeRule {

@@ -5,8 +5,8 @@ const prisma = new PrismaClient();
 
 const descriptions: Record<WorkspaceRole, string> = {
   OWNER: "Full workspace control, including membership and destructive administration.",
-  ADMIN: "Workspace administration, target approval workflow, and assessment control.",
-  ANALYST: "Target registration, verification, assessment execution, and finding review.",
+  ADMIN: "Workspace administration, target scope governance, and assessment control.",
+  ANALYST: "Target registration, scope configuration, assessment execution, and finding review.",
   VIEWER: "Read-only access to authorized workspace assessment data.",
 };
 

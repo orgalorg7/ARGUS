@@ -112,7 +112,6 @@ services:
     command: ["pnpm", "--filter", "@aasp/fixture-web", "start"]
     environment:
       FIXTURE_PORT: 4010
-      ASSESSMENT_VERIFICATION_TOKEN: ${FIXTURE_VERIFICATION_TOKEN:-fixture-runtime-token-not-for-production}
     ports:
       - "127.0.0.1:${FIXTURE_PORT:-4010}:4010"
     healthcheck:

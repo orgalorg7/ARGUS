@@ -239,7 +239,7 @@ select:focus {
     monospace;
   letter-spacing: 0.04em;
 }
-.status-VERIFIED,
+.status-READY,
 .status-COMPLETED {
   background: #e3f0e8;
   color: #23533c;
@@ -254,6 +254,7 @@ select:focus {
   color: #934b2e;
 }
 .severity-MEDIUM,
+.status-SCANNING,
 .status-COMPLETED_WITH_WARNINGS {
   background: #f6efd8;
   color: #775c18;

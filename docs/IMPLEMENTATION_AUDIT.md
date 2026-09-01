@@ -3,6 +3,8 @@
 Audit date: 2026-08-31
 Authoritative contract: `CODEX_MISSION_AUTHORIZED_AI_SECURITY_PLATFORM.md` (2,212 lines, read completely before changes)
 
+Policy revision (2026-09-01): technical ownership verification was removed by the authoritative Target Authorization & Scope Policy. Engagement authorization now occurs outside the platform. Target readiness depends on a valid persisted scope, and scope enforcement remains mandatory before every outbound request.
+
 ## CURRENT STATE
 
 The repository is a greenfield directory. At audit time it contained exactly one file: `CODEX_MISSION_AUTHORIZED_AI_SECURITY_PLATFORM.md` (approximately 36 KiB). The directory was not initialized as a Git repository.
@@ -42,8 +44,8 @@ All required controls were absent at audit time, including:
 
 - Authentication and password storage.
 - Workspace-scoped RBAC and tenant isolation.
-- Target authorization and verification state enforcement.
-- DNS TXT, well-known token, and privileged fixture verification.
+- Target scope configuration and readiness enforcement.
+- Explicit domain, subdomain, port, path-exclusion, and private-network policy persistence.
 - A scope engine guarding every outbound request.
 - SSRF, DNS-rebinding, redirect-escape, hostname-confusion, and IP-range defenses.
 - Persisted scan state transitions and audit events.
@@ -75,11 +77,11 @@ Redis/BullMQ ---> worker services
     +--> report generation
 ```
 
-Security boundaries are enforced in backend services. Every data access path carries a workspace identifier; every active network operation is routed through a scope-aware HTTP client; verified target state is checked both before queueing and before network execution; and deterministic evidence survives model or worker outages.
+Security boundaries are enforced in backend services. Every data access path carries a workspace identifier; every active network operation is routed through a scope-aware HTTP client; persisted target scope is validated before queueing and reconstructed before network execution; and deterministic evidence survives model or worker outages.
 
 ## FILES TO CREATE
 
-Day 1 creates the monorepo manifests and TypeScript configuration, `.env.example`, `.gitignore`, Docker Compose configurations, API and worker applications, Prisma schema and initial migration, shared schemas/security packages, the scope engine, authorization and scope tests, notebooks 00 and 01, and foundational security/architecture documentation.
+Day 1 creates the monorepo manifests and TypeScript configuration, `.env.example`, `.gitignore`, Docker Compose configurations, API and worker applications, Prisma schema and initial migration, shared schemas/security packages, the scope engine, readiness and scope tests, notebooks 00 and 01, and foundational security/architecture documentation.
 
 Later delivery days create the remaining services, web routes, notebooks 02-11, fixture applications, reporting templates, complete test suites, deployment assets, and the acceptance artifacts required by the contract.
 
@@ -91,7 +93,7 @@ No pre-existing implementation files were available to modify. The mission contr
 
 | Day | Outcome                                                                                                                              | Initial status                                                                                       |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| 1   | Monorepo, containers, database, auth, RBAC, workspaces, targets, verification, scope, scan state, worker foundation, notebooks 00-01 | Implemented; container runtime check blocked by unavailable Docker daemon                            |
+| 1   | Monorepo, containers, database, auth, RBAC, workspaces, targets, scope configuration, scan state, worker foundation, notebooks 00-01 | Implemented; container runtime check blocked by unavailable Docker daemon                            |
 | 2   | Discovery, crawler, endpoints, API discovery, fingerprinting, evidence persistence, notebooks 02-03                                  | Implemented; database-backed integration and Qwen baseline execution blocked by unavailable services |
 | 3   | HTTP/TLS/header/cookie/CORS/auth analyzers, safe-active framework, adapters, notebooks 04-05                                         | Implemented; container-backed queue execution and GPU notebook execution remain unverified           |
 | 4   | Normalization, correlation, scoring, Qwen provider and validation, notebooks 06-08                                                   | Implemented; real Qwen/GPU and container-backed queue execution remain externally unverified         |
@@ -106,7 +108,7 @@ Statuses are updated only after implementation and executed quality gates; they 
 1. Qwen 27B cannot be truthfully validated on the current CPU-only developer path; GPU/Colab execution remains an external runtime dependency and must fail visibly when unavailable.
 2. The seven-day scope is broad. The vertical slice must take precedence over scanner count and dashboard polish.
 3. DNS-rebinding defense requires resolution at request time and connection pinning/verification; a one-time hostname check is insufficient.
-4. A local fixture needs explicit privileged approval without weakening the default prohibition on private and loopback targets.
+4. A local fixture needs an explicit target scope with private networking enabled without weakening the default prohibition on private and loopback targets.
 5. Queue recovery and idempotency must be backed by persisted stage/job state, not BullMQ state alone.
 6. Tenant isolation is easy to regress unless repository queries require workspace scope and are covered by cross-workspace tests.
 7. Model output must never elevate untrusted target text into instructions or create findings without valid evidence identifiers.
@@ -228,7 +230,7 @@ Executed checks on 2026-08-31:
 - Isolated clean installation: fresh `aasp-day7` PostgreSQL, Redis, and report volumes were created; the committed Prisma migration and idempotent seed ran; API/PostgreSQL/Redis/fixture became healthy; web and worker ran. The original stack and volumes were restored afterward, while fresh audit volumes were retained.
 - Fresh authorized scan `cmthp7ab4000fmn5me43cv5jk`: 16 URLs, 19 endpoints, 9 evidence-backed findings, 11 reports, authenticated report HTTP 200, and explicit AI degradation because no provider existed.
 - Fresh worker-outage scan `cmthp7ngp001omn5meige07fb`: queued while the worker was stopped and completed after restart with 9 evidence-backed findings and 11 reports.
-- Black-box tenant isolation: cross-workspace target verification, scan creation, assets, URLs, endpoints, technologies, evidence, findings, reports, and report content were all blocked even though the caller owned both workspaces. Artifact: `artifacts/day7-fresh-tenant-isolation.json`.
+- Black-box tenant isolation: cross-workspace target scope configuration, scan creation, assets, URLs, endpoints, technologies, evidence, findings, reports, and report content were all blocked even though the caller owned both workspaces. Artifact: `artifacts/day7-fresh-tenant-isolation.json`.
 - Final report scan `cmthpjyfw000fnv5lay4ryt8u`: all 11 database hashes matched the authenticated response bytes; complete and per-finding JSON used `COMPLETED_WITH_WARNINGS`; both report stages were recorded `COMPLETED`; every finding had evidence. Artifact: `artifacts/day7-report-integrity.json`. Exported reports: `reports/day7-final-acceptance/`.
 - Formatting and lint: passed with zero warnings.
 - TypeScript typecheck and production build: passed for all 25 applicable workspace projects.
@@ -238,3 +240,21 @@ Executed checks on 2026-08-31:
 - Final source hygiene search: no TODO/FIXME, unimplemented exception, temporary `console.log`, empty catch, unsafe `any`, or disabled/skipped test was found. Remaining `mock` strings are explicit test doubles; remaining `placeholder` strings are HTML input attributes.
 
 Day 7 implementation is complete. Final product acceptance is not yet complete because the required real `Qwen/Qwen3.8-27B` inference, baseline/evaluation, and notebook 11 model-backed path have not run. This is the next external-runtime phase, not a simulated success.
+
+## TARGET SCOPE POLICY REVISION — 2026-09-01
+
+The target execution contract now treats organizational engagement authorization as an external prerequisite and makes persisted scope the platform's hard technical boundary. DNS TXT, well-known-file, token, email, and privileged fixture ownership challenges were removed. Targets move from `DRAFT` to `READY` when valid domains, ports, subdomain handling, excluded paths, and private-network policy are saved. Scan start atomically reserves a reusable ready/terminal target as `SCANNING`; terminal scan transitions synchronize the corresponding target state.
+
+The scope engine was not relaxed. API and worker entry points reconstruct policy from enabled persisted rules, and every transport operation still validates scheme, hostname, port, path, resolved addresses, DNS pins, and redirects before opening a socket. Scan configuration cannot widen the target's subdomain boundary.
+
+Executed checks on 2026-09-01:
+
+- Clean and populated PostgreSQL 17 migrations passed. Legacy approved targets became `READY`, obsolete waiting scans became `CREATED`, legacy waiting stages and ownership-verification storage were removed, origin ports were backfilled, and active jobs retain a `SCANNING` target reservation.
+- The database target-state trigger was exercised through `READY -> SCANNING -> COMPLETED`.
+- Formatting and lint passed with zero warnings.
+- TypeScript typecheck and production builds passed for all 25 applicable workspace projects.
+- Automated tests passed: 70 tests across 14 files, including target readiness, scope construction, SSRF, DNS rebinding, redirect escape, and evidence/report controls.
+- CPU, production, and GPU Compose configuration rendering passed with validation-only secrets.
+- The production Docker image built successfully from the frozen lockfile.
+- The production dependency audit reported no known vulnerabilities after updating within NestJS 11.
+- Qwen inference was not rerun for this policy-only revision; no new model result is claimed.

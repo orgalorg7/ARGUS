@@ -20,7 +20,8 @@ import {
   type ScanConfigInput,
   type ScanState,
 } from "@aasp/schemas";
-import { assertCurrentTargetAuthorization, assertScanTransition } from "@aasp/security-core";
+import { scopePolicyFromTarget } from "@aasp/scope-engine";
+import { assertScanTransition, assertTargetReadyForScan } from "@aasp/security-core";
 import { AuditService } from "../audit/audit.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { QueuePublisherService, orchestrationQueueName } from "../queue/queue-publisher.service.js";
@@ -223,14 +224,14 @@ export class ScansService {
   ) {
     const target = await this.prisma.target.findFirst({
       where: { id: input.targetId, workspaceId },
+      include: { scopeRules: { where: { enabled: true } } },
     });
     if (!target) throw new NotFoundException("Target does not exist in this workspace.");
     try {
-      assertCurrentTargetAuthorization(target);
+      assertTargetReadyForScan(target);
+      scopePolicyFromTarget(target);
     } catch {
-      throw new ConflictException(
-        "An assessment requires a currently VERIFIED target authorization.",
-      );
+      throw new ConflictException("The target must be enabled with a valid saved scope.");
     }
 
     const defaults = scanProfileDefaults[input.profile];
@@ -245,7 +246,7 @@ export class ScansService {
         targetId: target.id,
         createdById: actorId,
         name: input.name.trim(),
-        state: DatabaseScanState.AUTHORIZED,
+        state: DatabaseScanState.CREATED,
         config: {
           create: {
             profile: input.profile,
@@ -256,7 +257,7 @@ export class ScansService {
             concurrency: config.concurrency,
             timeoutMs: config.timeoutMs,
             followRedirects: config.followRedirects,
-            includeSubdomains: config.includeSubdomains,
+            includeSubdomains: target.includeSubdomains,
           },
         },
         stages: {
@@ -283,19 +284,31 @@ export class ScansService {
   async start(workspaceId: string, scanId: string, actorId: string) {
     const scan = await this.prisma.scan.findFirst({
       where: { id: scanId, workspaceId },
-      include: { target: true },
+      include: { target: { include: { scopeRules: { where: { enabled: true } } } } },
     });
     if (!scan) throw new NotFoundException("Scan does not exist in this workspace.");
     try {
-      assertCurrentTargetAuthorization(scan.target);
+      assertTargetReadyForScan(scan.target);
+      scopePolicyFromTarget(scan.target);
     } catch {
-      throw new ConflictException("Target authorization is no longer valid.");
+      throw new ConflictException("Target is disabled, busy, or has an invalid saved scope.");
     }
     assertScanTransition(scan.state as ScanState, "QUEUED");
     const idempotencyKey = `orchestrate:${scan.id}:v1`;
     const queued = await this.prisma.$transaction(async (transaction) => {
+      const reservedTarget = await transaction.target.updateMany({
+        where: {
+          id: scan.targetId,
+          workspaceId,
+          status: { in: ["READY", "COMPLETED", "FAILED", "CANCELLED"] },
+        },
+        data: { status: "SCANNING" },
+      });
+      if (reservedTarget.count !== 1) {
+        throw new ConflictException("Target is no longer available to start this assessment.");
+      }
       const updated = await transaction.scan.updateMany({
-        where: { id: scan.id, workspaceId, state: DatabaseScanState.AUTHORIZED },
+        where: { id: scan.id, workspaceId, state: DatabaseScanState.CREATED },
         data: { state: DatabaseScanState.QUEUED, queuedAt: new Date() },
       });
       if (updated.count !== 1)
@@ -362,7 +375,6 @@ export class ScansService {
     const now = new Date();
     const immediate =
       scan.state === DatabaseScanState.CREATED ||
-      scan.state === DatabaseScanState.WAITING_FOR_TARGET_VERIFICATION ||
       scan.state === DatabaseScanState.AUTHORIZED ||
       scan.state === DatabaseScanState.QUEUED;
     const updated = await this.prisma.$transaction(async (transaction) => {
@@ -374,6 +386,10 @@ export class ScansService {
         },
       });
       if (immediate) {
+        await transaction.target.updateMany({
+          where: { id: scan.targetId, workspaceId, status: "SCANNING" },
+          data: { status: "CANCELLED" },
+        });
         await transaction.scanJob.updateMany({
           where: {
             workspaceId,

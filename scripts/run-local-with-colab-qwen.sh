@@ -50,7 +50,6 @@ PY
     printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)"
     printf 'MODEL_PROVIDER_ENCRYPTION_KEY=%s\n' "$(openssl rand -base64 32 | tr -d '\n')"
     printf 'POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 20)"
-    printf 'FIXTURE_VERIFICATION_TOKEN=%s\n' "$(openssl rand -hex 24)"
     printf 'QWEN_BASE_URL=%s\n' "$qwen_base_url"
     printf 'QWEN_API_KEY=%s\n' "$qwen_api_key"
     printf 'QWEN_MODEL=Qwen/Qwen3.8-27B\n'
@@ -274,11 +273,10 @@ run_qwen_demo() {
   workspace_id=$(jq -er '.id' <<<"$workspace")
   target=$(curl --fail --silent --show-error -X POST "$api_url/workspaces/$workspace_id/targets" \
     -H "$authorization" -H 'content-type: application/json' \
-    --data '{"name":"Owned Docker Fixture","url":"http://fixture.internal:4010","method":"MANUAL_ADMIN"}')
-  target_id=$(jq -er '.target.id' <<<"$target")
-  [[ $(curl --fail --silent --show-error -X POST "$api_url/workspaces/$workspace_id/targets/$target_id/verify" \
-    -H "$authorization" -H 'content-type: application/json' --data '{}' | jq -r '.status') == VERIFIED ]] ||
-    fail "Owned fixture authorization did not reach VERIFIED."
+    --data '{"name":"Owned Docker Fixture","url":"http://fixture.internal:4010","scope":{"allowedDomains":["fixture.internal"],"includeSubdomains":false,"allowedPorts":[4010],"excludedPaths":[],"allowPrivateNetwork":true}}')
+  target_id=$(jq -er '.id' <<<"$target")
+  [[ $(jq -r '.status' <<<"$target") == READY ]] ||
+    fail "Owned fixture scope configuration did not reach READY."
 
   scan=$(curl --fail --silent --show-error -X POST "$api_url/workspaces/$workspace_id/scans" \
     -H "$authorization" -H 'content-type: application/json' \

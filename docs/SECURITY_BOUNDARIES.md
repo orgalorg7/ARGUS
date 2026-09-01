@@ -1,12 +1,12 @@
 # Security Boundaries
 
-## Authorization boundary
+## Engagement and execution boundary
 
-`Target.status == VERIFIED` with a non-expired `authorizationExpiresAt` is required to create and start an assessment. The worker checks the same condition again. Local/private targets require a system administrator to approve a hostname restricted to local/internal fixture conventions; this approval is explicit and sets the target-specific `allowPrivateNetwork` flag.
+Business authorization is established outside the platform before target entry. The platform does not perform domain-ownership challenges. It does require a valid persisted target scope and sufficient workspace permission before scan creation/start. A target is atomically reserved as `SCANNING` when its scan is queued, and workers reject jobs whose target is not in that state.
 
 ## Network boundary
 
-Only HTTP and HTTPS are accepted. User information in URLs is rejected. Hostnames are normalized to ASCII and matched on an exact or dot-delimited subdomain boundary. Only target-authorized ports are accepted. DNS is resolved immediately before transport, every answer is classified, prohibited ranges are blocked, and the approved address is pinned into the socket lookup. Redirects are rechecked before following.
+Only HTTP and HTTPS are accepted. User information in URLs is rejected. Hostnames are normalized to ASCII and matched against configured allowed domains on an exact or dot-delimited subdomain boundary. Only configured ports are accepted. Excluded paths are blocked. DNS is resolved immediately before transport, every answer is classified, prohibited ranges are blocked unless the target explicitly permits private networking, and the approved address is pinned into the socket lookup. Redirects are rechecked before following.
 
 The scope client permits only GET, HEAD, and OPTIONS. It imposes time and response-size limits and removes sensitive request headers when following redirects. Scanner services must not instantiate general-purpose network clients.
 
@@ -20,4 +20,4 @@ Target content is untrusted data. Evidence redaction removes credential-bearing 
 
 ## Current implementation boundary
 
-Day 1 implements authorization, scope validation, durable scan orchestration entry, and the schema for later stages. Discovery and security analyzers are not yet consumers of their queued jobs and therefore are not represented as completed.
+The complete worker pipeline consumes persisted jobs and uses the same target-derived scope policy for discovery, crawling, API discovery, fingerprinting, passive analysis, and safe active analysis. Model output cannot widen this boundary or invoke network operations.
