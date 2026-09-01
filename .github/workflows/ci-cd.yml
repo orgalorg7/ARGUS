@@ -85,6 +85,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
+      actions: read
       contents: read
       security-events: write
     steps:
@@ -101,10 +102,13 @@ jobs:
 
       - name: Analyze
         uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          upload: ${{ vars.CODEQL_UPLOAD_ENABLED == 'true' && 'always' || 'never' }}
+          upload-database: false
 
   container:
     name: Build and publish platform image
-    needs: [quality]
+    needs: [quality, codeql]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
