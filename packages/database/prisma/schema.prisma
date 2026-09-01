@@ -1,0 +1,666 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  ANALYST
+  VIEWER
+}
+
+enum TargetStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
+  DISABLED
+}
+
+enum VerificationMethod {
+  DNS_TXT
+  WELL_KNOWN
+  MANUAL_ADMIN
+}
+
+enum VerificationStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  EXPIRED
+}
+
+enum ScopeRuleType {
+  HOST
+  SUBDOMAIN
+  PORT
+  PATH_INCLUDE
+  PATH_EXCLUDE
+  PRIVATE_NETWORK
+}
+
+enum ScanProfile {
+  LIGHT
+  STANDARD
+  DEEP_SAFE
+}
+
+enum ScanState {
+  CREATED
+  WAITING_FOR_TARGET_VERIFICATION
+  AUTHORIZED
+  QUEUED
+  VALIDATING_SCOPE
+  DISCOVERY
+  CRAWLING
+  API_DISCOVERY
+  FINGERPRINTING
+  PASSIVE_ANALYSIS
+  SAFE_ACTIVE_ANALYSIS
+  NORMALIZING
+  CORRELATING
+  AI_ANALYSIS
+  AI_ANALYSIS_WAITING_FOR_PROVIDER
+  GENERATING_SCAN_REPORT
+  GENERATING_VULNERABILITY_REPORTS
+  COMPLETED
+  COMPLETED_WITH_WARNINGS
+  FAILED
+  CANCELLED
+}
+
+enum StageStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  DEGRADED
+  FAILED
+  CANCELLED
+  WAITING
+}
+
+enum JobStatus {
+  CREATED
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum Severity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum FindingStatus {
+  OPEN
+  ACCEPTED_RISK
+  FALSE_POSITIVE
+  REMEDIATED
+  MANUAL_VERIFICATION_REQUIRED
+}
+
+enum AIAnalysisStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  WAITING_FOR_PROVIDER
+}
+
+enum ReportType {
+  COMPLETE_SCAN
+  COMPLETE_SCAN_PDF_READY
+  VULNERABILITY
+}
+
+enum ReportStatus {
+  PENDING
+  GENERATED
+  FAILED
+}
+
+enum WorkerStatus {
+  ONLINE
+  OFFLINE
+  DRAINING
+}
+
+enum ModelProviderStatus {
+  ONLINE
+  OFFLINE
+  DEGRADED
+  UNKNOWN
+}
+
+model User {
+  id             String            @id @default(cuid())
+  email          String            @unique
+  passwordHash   String
+  displayName    String
+  isSystemAdmin  Boolean           @default(false)
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  memberships    WorkspaceMember[]
+  createdTargets Target[]          @relation("TargetCreatedBy")
+  createdScans   Scan[]            @relation("ScanCreatedBy")
+  auditEvents    AuditEvent[]
+}
+
+model Role {
+  id          String            @id @default(cuid())
+  name        WorkspaceRole     @unique
+  description String
+  members     WorkspaceMember[]
+  createdAt   DateTime          @default(now())
+}
+
+model Workspace {
+  id             String                @id @default(cuid())
+  name           String
+  slug           String                @unique
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  members        WorkspaceMember[]
+  targets        Target[]
+  scans          Scan[]
+  scopeRules     ScopeRule[]
+  assets         DiscoveredAsset[]
+  urls           DiscoveredURL[]
+  endpoints      DiscoveredEndpoint[]
+  parameters     DiscoveredParameter[]
+  technologies   Technology[]
+  observations   ScannerObservation[]
+  evidence       Evidence[]
+  findings       Finding[]
+  aiAnalyses     AIAnalysis[]
+  reports        Report[]
+  auditEvents    AuditEvent[]
+  modelProviders ModelProvider[]
+}
+
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String
+  roleId      String
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Target {
+  id                     String               @id @default(cuid())
+  workspaceId            String
+  name                   String
+  origin                 String
+  normalizedHostname     String
+  normalizedPort         Int?
+  status                 TargetStatus         @default(PENDING_VERIFICATION)
+  allowPrivateNetwork    Boolean              @default(false)
+  authorizationExpiresAt DateTime?
+  createdById            String
+  verifiedAt             DateTime?
+  disabledAt             DateTime?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  workspace              Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy              User                 @relation("TargetCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  verifications          TargetVerification[]
+  scopeRules             ScopeRule[]
+  scans                  Scan[]
+
+  @@unique([workspaceId, origin])
+  @@index([workspaceId, status])
+}
+
+model TargetVerification {
+  id             String             @id @default(cuid())
+  workspaceId    String
+  targetId       String
+  method         VerificationMethod
+  status         VerificationStatus @default(PENDING)
+  tokenHash      String
+  tokenHint      String
+  attemptCount   Int                @default(0)
+  lastAttemptAt  DateTime?
+  verifiedAt     DateTime?
+  expiresAt      DateTime
+  failureReason  String?
+  verifierUserId String?
+  createdAt      DateTime           @default(now())
+  target         Target             @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, targetId, status])
+}
+
+model ScopeRule {
+  id          String        @id @default(cuid())
+  workspaceId String
+  targetId    String
+  type        ScopeRuleType
+  value       String
+  enabled     Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  target      Target        @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, targetId, enabled])
+}
+
+model Scan {
+  id                String                @id @default(cuid())
+  workspaceId       String
+  targetId          String
+  name              String
+  state             ScanState             @default(CREATED)
+  warningCount      Int                   @default(0)
+  failureReason     String?
+  cancelRequestedAt DateTime?
+  createdById       String
+  queuedAt          DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  workspace         Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  target            Target                @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  createdBy         User                  @relation("ScanCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  config            ScanConfig?
+  stages            ScanStage[]
+  jobs              ScanJob[]
+  assets            DiscoveredAsset[]
+  urls              DiscoveredURL[]
+  endpoints         DiscoveredEndpoint[]
+  parameters        DiscoveredParameter[]
+  technologies      Technology[]
+  observations      ScannerObservation[]
+  evidence          Evidence[]
+  findings          Finding[]
+  aiAnalyses        AIAnalysis[]
+  reports           Report[]
+
+  @@index([workspaceId, state])
+  @@index([targetId, createdAt])
+}
+
+model ScanConfig {
+  id                String      @id @default(cuid())
+  scanId            String      @unique
+  profile           ScanProfile
+  crawlDepth        Int
+  maxUrls           Int
+  maxRequests       Int
+  requestsPerSecond Float
+  concurrency       Int
+  timeoutMs         Int
+  followRedirects   Boolean
+  includeSubdomains Boolean
+  createdAt         DateTime    @default(now())
+  scan              Scan        @relation(fields: [scanId], references: [id], onDelete: Cascade)
+}
+
+model ScanStage {
+  id             String      @id @default(cuid())
+  workspaceId    String
+  scanId         String
+  name           ScanState
+  status         StageStatus @default(QUEUED)
+  completedUnits Int?
+  totalUnits     Int?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  errorMessage   String?
+  metadata       Json?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  scan           Scan        @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@unique([scanId, name])
+  @@index([workspaceId, scanId])
+}
+
+model ScanJob {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  scanId         String
+  queue          String
+  idempotencyKey String    @unique
+  bullJobId      String?
+  status         JobStatus @default(CREATED)
+  attempt        Int       @default(0)
+  maxAttempts    Int       @default(3)
+  payload        Json
+  result         Json?
+  lastError      String?
+  lockedBy       String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  scan           Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, scanId, status])
+}
+
+model DiscoveredAsset {
+  id          String    @id @default(cuid())
+  workspaceId String
+  scanId      String
+  assetType   String
+  value       String
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  metadata    Json?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scan        Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@unique([scanId, assetType, value])
+  @@index([workspaceId, scanId])
+}
+
+model DiscoveredURL {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  scanId       String
+  url          String
+  canonicalUrl String
+  depth        Int
+  statusCode   Int?
+  contentType  String?
+  discoveredBy String
+  scannedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scan         Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@unique([scanId, canonicalUrl])
+  @@index([workspaceId, scanId])
+}
+
+model DiscoveredEndpoint {
+  id          String                @id @default(cuid())
+  workspaceId String
+  scanId      String
+  asset       String
+  path        String
+  method      String
+  source      String
+  createdAt   DateTime              @default(now())
+  workspace   Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scan        Scan                  @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  parameters  DiscoveredParameter[]
+
+  @@unique([scanId, asset, path, method])
+  @@index([workspaceId, scanId])
+}
+
+model DiscoveredParameter {
+  id           String             @id @default(cuid())
+  workspaceId  String
+  scanId       String
+  endpointId   String
+  name         String
+  location     String
+  observedType String?
+  createdAt    DateTime           @default(now())
+  workspace    Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scan         Scan               @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  endpoint     DiscoveredEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@unique([endpointId, name, location])
+  @@index([workspaceId, scanId])
+}
+
+model Technology {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  scanId          String
+  technology      String
+  possibleVersion String?
+  confidence      Float
+  evidenceIds     String[]
+  createdAt       DateTime  @default(now())
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scan            Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@unique([scanId, technology, possibleVersion])
+  @@index([workspaceId, scanId])
+}
+
+model ScannerObservation {
+  id              String              @id @default(cuid())
+  workspaceId     String
+  scanId          String
+  scanner         String
+  scannerVersion  String
+  observationType String
+  asset           String
+  endpoint        String?
+  method          String?
+  parameter       String?
+  rawSeverity     String?
+  metadata        Json
+  signature       String
+  createdAt       DateTime            @default(now())
+  workspace       Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scan            Scan                @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  evidence        Evidence[]
+  occurrences     FindingOccurrence[]
+
+  @@index([workspaceId, scanId, observationType])
+  @@index([scanId, signature])
+}
+
+model Evidence {
+  id               String              @id @default(cuid())
+  workspaceId      String
+  scanId           String
+  observationId    String?
+  timestamp        DateTime            @default(now())
+  source           String
+  asset            String
+  requestMetadata  Json
+  responseMetadata Json
+  redactedExcerpt  String
+  hash             String
+  createdAt        DateTime            @default(now())
+  workspace        Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scan             Scan                @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  observation      ScannerObservation? @relation(fields: [observationId], references: [id], onDelete: SetNull)
+  findingLinks     FindingEvidence[]
+
+  @@index([workspaceId, scanId])
+  @@index([scanId, hash])
+}
+
+model Finding {
+  id                         String              @id @default(cuid())
+  publicId                   String
+  workspaceId                String
+  scanId                     String
+  title                      String
+  category                   String
+  severity                   Severity
+  confidence                 Float
+  status                     FindingStatus       @default(OPEN)
+  cwe                        String[]
+  owasp                      String[]
+  asset                      String
+  endpoint                   String?
+  method                     String?
+  parameter                  String?
+  description                String
+  technicalImpact            String
+  businessImpact             String
+  scannerSources             String[]
+  remediation                String
+  manualVerificationRequired Boolean             @default(false)
+  correlationKey             String
+  firstSeen                  DateTime            @default(now())
+  lastSeen                   DateTime            @default(now())
+  workspace                  Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scan                       Scan                @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  evidenceLinks              FindingEvidence[]
+  occurrences                FindingOccurrence[]
+  history                    FindingHistory[]
+  aiAnalyses                 AIAnalysis[]
+  reports                    Report[]
+
+  @@unique([scanId, publicId])
+  @@unique([scanId, correlationKey])
+  @@index([workspaceId, scanId, severity])
+}
+
+model FindingEvidence {
+  findingId  String
+  evidenceId String
+  createdAt  DateTime @default(now())
+  finding    Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  evidence   Evidence @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+
+  @@id([findingId, evidenceId])
+}
+
+model FindingOccurrence {
+  id            String             @id @default(cuid())
+  findingId     String
+  observationId String
+  createdAt     DateTime           @default(now())
+  finding       Finding            @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  observation   ScannerObservation @relation(fields: [observationId], references: [id], onDelete: Restrict)
+
+  @@unique([findingId, observationId])
+}
+
+model FindingHistory {
+  id        String   @id @default(cuid())
+  findingId String
+  action    String
+  before    Json?
+  after     Json?
+  actorId   String?
+  createdAt DateTime @default(now())
+  finding   Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([findingId, createdAt])
+}
+
+model AIAnalysis {
+  id            String           @id @default(cuid())
+  workspaceId   String
+  scanId        String
+  findingId     String?
+  providerId    String?
+  status        AIAnalysisStatus @default(PENDING)
+  modelName     String
+  promptVersion String
+  input         Json
+  output        Json?
+  schemaValid   Boolean?
+  evidenceValid Boolean?
+  retryCount    Int              @default(0)
+  failureReason String?
+  latencyMs     Int?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  workspace     Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scan          Scan             @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  finding       Finding?         @relation(fields: [findingId], references: [id], onDelete: SetNull)
+  provider      ModelProvider?   @relation(fields: [providerId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, scanId, status])
+}
+
+model Report {
+  id           String       @id @default(cuid())
+  workspaceId  String
+  scanId       String
+  findingId    String?
+  type         ReportType
+  status       ReportStatus @default(PENDING)
+  path         String?
+  sha256       String?
+  errorMessage String?
+  generatedAt  DateTime?
+  createdAt    DateTime     @default(now())
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scan         Scan         @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  finding      Finding?     @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, scanId, type])
+}
+
+model AuditEvent {
+  id           String     @id @default(cuid())
+  workspaceId  String?
+  actorId      String?
+  action       String
+  resourceType String
+  resourceId   String?
+  requestId    String?
+  ipAddress    String?
+  userAgent    String?
+  metadata     Json?
+  createdAt    DateTime   @default(now())
+  workspace    Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor        User?      @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model Worker {
+  id            String            @id
+  name          String
+  queues        String[]
+  status        WorkerStatus      @default(ONLINE)
+  startedAt     DateTime          @default(now())
+  lastHeartbeat DateTime          @default(now())
+  metadata      Json?
+  heartbeats    WorkerHeartbeat[]
+}
+
+model WorkerHeartbeat {
+  id        String       @id @default(cuid())
+  workerId  String
+  timestamp DateTime     @default(now())
+  status    WorkerStatus
+  metrics   Json?
+  worker    Worker       @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([workerId, timestamp])
+}
+
+model ModelProvider {
+  id                         String              @id @default(cuid())
+  workspaceId                String?
+  name                       String
+  baseUrl                    String
+  modelName                  String
+  encryptedApiKey            String?
+  apiKeyInitializationVector String?
+  status                     ModelProviderStatus @default(UNKNOWN)
+  lastHeartbeat              DateTime?
+  lastError                  String?
+  createdAt                  DateTime            @default(now())
+  updatedAt                  DateTime            @updatedAt
+  workspace                  Workspace?          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  analyses                   AIAnalysis[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, status])
+}

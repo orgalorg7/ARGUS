@@ -1,0 +1,41 @@
+{
+  "name": "@aasp/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/main.ts",
+    "demo:day2": "tsx src/day2-local-demo.ts",
+    "demo:day3": "tsx src/day3-local-demo.ts",
+    "demo:day4": "tsx src/day4-local-demo.ts",
+    "demo:day5": "tsx src/day5-local-demo.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aasp/ai-engine": "workspace:*",
+    "@aasp/api-discovery": "workspace:*",
+    "@aasp/crawler": "workspace:*",
+    "@aasp/correlation-engine": "workspace:*",
+    "@aasp/database": "workspace:*",
+    "@aasp/evidence-engine": "workspace:*",
+    "@aasp/finding-engine": "workspace:*",
+    "@aasp/logger": "workspace:*",
+    "@aasp/report-engine": "workspace:*",
+    "@aasp/scanner-auth-surface": "workspace:*",
+    "@aasp/scanner-cookies": "workspace:*",
+    "@aasp/scanner-cors": "workspace:*",
+    "@aasp/scanner-headers": "workspace:*",
+    "@aasp/scanner-http": "workspace:*",
+    "@aasp/scanner-integrations": "workspace:*",
+    "@aasp/scanner-misconfiguration": "workspace:*",
+    "@aasp/scanner-tls": "workspace:*",
+    "@aasp/schemas": "workspace:*",
+    "@aasp/scope-engine": "workspace:*",
+    "@aasp/security-core": "workspace:*",
+    "@aasp/technology-fingerprinter": "workspace:*",
+    "bullmq": "6.3.2",
+    "ioredis": "5.8.2"
+  }
+}

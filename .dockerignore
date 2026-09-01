@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/.next
+**/*.tsbuildinfo
+.git
+.env
+artifacts
+checkpoints
+datasets
+docs
+evaluations
+models
+notebooks
+reports

@@ -1,0 +1,37 @@
+{
+  "name": "authorized-ai-security-platform",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "dev": "pnpm --parallel --filter @aasp/api --filter @aasp/worker --filter @aasp/web dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings=0",
+    "pretypecheck": "pnpm --filter @aasp/schemas build && pnpm --filter @aasp/database build && pnpm --filter @aasp/logger build && pnpm --filter @aasp/scope-engine build && pnpm --filter @aasp/security-core build && pnpm --filter @aasp/evidence-engine build && pnpm --filter @aasp/crawler build && pnpm --filter @aasp/api-discovery build && pnpm --filter @aasp/technology-fingerprinter build && pnpm --filter @aasp/scanner-integrations build && pnpm --filter @aasp/scanner-http build && pnpm --filter @aasp/scanner-headers build && pnpm --filter @aasp/scanner-cookies build && pnpm --filter @aasp/scanner-auth-surface build && pnpm --filter @aasp/scanner-misconfiguration build && pnpm --filter @aasp/scanner-tls build && pnpm --filter @aasp/scanner-cors build && pnpm --filter @aasp/finding-engine build && pnpm --filter @aasp/correlation-engine build && pnpm --filter @aasp/ai-engine build && pnpm --filter @aasp/report-engine build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:security": "vitest run tests/security",
+    "prisma:generate": "prisma generate --schema packages/database/prisma/schema.prisma",
+    "prisma:migrate": "prisma migrate deploy --schema packages/database/prisma/schema.prisma",
+    "prisma:migrate:dev": "prisma migrate dev --schema packages/database/prisma/schema.prisma",
+    "prisma:seed": "tsx packages/database/prisma/seed.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@types/node": "24.10.1",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "prettier": "3.6.2",
+    "prisma": "6.19.3",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.46.3",
+    "vitest": "3.2.7"
+  }
+}

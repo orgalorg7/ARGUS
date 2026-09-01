@@ -1,0 +1,25 @@
+name: argus
+
+# Production override: every application role runs the exact immutable image
+# built by CI. The intentionally vulnerable fixture is disabled unless an
+# operator explicitly enables the demo profile.
+services:
+  api:
+    image: ${ARGUS_PLATFORM_IMAGE:?Set ARGUS_PLATFORM_IMAGE to an immutable GHCR tag}
+    pull_policy: always
+
+  worker:
+    image: ${ARGUS_PLATFORM_IMAGE:?Set ARGUS_PLATFORM_IMAGE to an immutable GHCR tag}
+    pull_policy: always
+
+  reports-init:
+    image: ${ARGUS_PLATFORM_IMAGE:?Set ARGUS_PLATFORM_IMAGE to an immutable GHCR tag}
+    pull_policy: always
+
+  web:
+    image: ${ARGUS_PLATFORM_IMAGE:?Set ARGUS_PLATFORM_IMAGE to an immutable GHCR tag}
+    pull_policy: always
+
+  fixture:
+    image: ${ARGUS_PLATFORM_IMAGE:?Set ARGUS_PLATFORM_IMAGE to an immutable GHCR tag}
+    profiles: [demo]

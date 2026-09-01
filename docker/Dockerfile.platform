@@ -1,0 +1,35 @@
+FROM node:24.11.0-bookworm-slim AS build
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl && \
+    rm -rf /var/lib/apt/lists/*
+RUN corepack enable
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json eslint.config.mjs .prettierrc.json ./
+RUN --mount=type=cache,id=aasp-pnpm-store,target=/pnpm/store \
+    pnpm config set store-dir /pnpm/store && \
+    pnpm config set fetch-timeout 300000 && \
+    pnpm fetch --frozen-lockfile
+COPY apps ./apps
+COPY packages ./packages
+COPY services ./services
+COPY fixtures ./fixtures
+COPY tests ./tests
+COPY vitest.config.ts ./vitest.config.ts
+RUN --mount=type=cache,id=aasp-pnpm-store,target=/pnpm/store \
+    pnpm config set store-dir /pnpm/store && \
+    pnpm install --offline --frozen-lockfile
+RUN pnpm prisma:generate
+RUN pnpm build
+
+FROM node:24.11.0-bookworm-slim AS runtime
+ENV NODE_ENV=production
+ENV COREPACK_HOME=/opt/corepack
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl && \
+    rm -rf /var/lib/apt/lists/* && \
+    corepack enable && groupadd --system app && \
+    useradd --system --gid app --create-home --home-dir /home/app app && \
+    mkdir -p /opt/corepack && chown -R app:app /opt/corepack
+COPY --from=build --chown=app:app /root/.cache/node/corepack /opt/corepack
+COPY --from=build --chown=app:app /app /app
+USER app
+CMD ["pnpm", "--filter", "@aasp/api", "start"]

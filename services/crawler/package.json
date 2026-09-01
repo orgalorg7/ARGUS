@@ -1,0 +1,23 @@
+{
+  "name": "@aasp/crawler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aasp/scope-engine": "workspace:*",
+    "cheerio": "1.2.0",
+    "fast-xml-parser": "5.11.1"
+  }
+}

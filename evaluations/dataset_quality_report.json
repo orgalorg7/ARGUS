@@ -1,0 +1,19 @@
+{
+  "input_path": "datasets/processed/security_dataset.jsonl",
+  "records_parsed": 2,
+  "records_valid": 2,
+  "malformed_lines": 0,
+  "issue_counts": {},
+  "severity_distribution": {
+    "LOW": 1,
+    "MEDIUM": 1
+  },
+  "near_duplicate_threshold": 0.92,
+  "near_duplicate_pairs": [],
+  "train_test_overlap": {
+    "train_test": 0,
+    "train_validation": 0,
+    "test_validation": 0
+  },
+  "issues": []
+}

@@ -1,0 +1,44 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "jsx": "preserve",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@aasp/schemas": ["packages/schemas/src/index.ts"],
+      "@aasp/security-core": ["packages/security-core/src/index.ts"],
+      "@aasp/scope-engine": ["services/scope-engine/src/index.ts"],
+      "@aasp/crawler": ["services/crawler/src/index.ts"],
+      "@aasp/api-discovery": ["services/api-discovery/src/index.ts"],
+      "@aasp/technology-fingerprinter": ["services/technology-fingerprinter/src/index.ts"],
+      "@aasp/scanner-integrations": ["services/scanner-integrations/src/index.ts"],
+      "@aasp/scanner-http": ["services/scanner-http/src/index.ts"],
+      "@aasp/scanner-headers": ["services/scanner-headers/src/index.ts"],
+      "@aasp/scanner-cookies": ["services/scanner-cookies/src/index.ts"],
+      "@aasp/scanner-auth-surface": ["services/scanner-auth-surface/src/index.ts"],
+      "@aasp/scanner-misconfiguration": ["services/scanner-misconfiguration/src/index.ts"],
+      "@aasp/scanner-tls": ["services/scanner-tls/src/index.ts"],
+      "@aasp/scanner-cors": ["services/scanner-cors/src/index.ts"],
+      "@aasp/finding-engine": ["services/finding-engine/src/index.ts"],
+      "@aasp/correlation-engine": ["services/correlation-engine/src/index.ts"],
+      "@aasp/ai-engine": ["services/ai-engine/src/index.ts"],
+      "@aasp/report-engine": ["services/report-engine/src/index.ts"]
+    },
+    "noEmit": true,
+    "declaration": false
+  },
+  "include": [
+    "apps/**/*.ts",
+    "apps/**/*.tsx",
+    "apps/**/test/**/*.ts",
+    "packages/**/*.ts",
+    "services/**/*.ts",
+    "fixtures/**/*.ts",
+    "tests/**/*.ts",
+    "*.config.ts"
+  ],
+  "exclude": ["**/dist/**", "**/.next/**", "node_modules"]
+}
