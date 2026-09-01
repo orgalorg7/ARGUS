@@ -16,7 +16,7 @@
     "@aasp/scope-engine": "workspace:*",
     "@aasp/security-core": "workspace:*",
     "@nestjs/common": "11.1.8",
-    "@nestjs/core": "11.1.8",
+    "@nestjs/core": "11.1.18",
     "@nestjs/jwt": "11.0.1",
     "@nestjs/platform-express": "11.1.8",
     "argon2": "0.44.0",
