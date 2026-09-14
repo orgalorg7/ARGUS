@@ -24,15 +24,15 @@
     "prisma:seed": "tsx packages/database/prisma/seed.ts"
   },
   "devDependencies": {
-    "@eslint/js": "9.39.5",
-    "@types/node": "24.10.1",
-    "eslint": "9.39.5",
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.5.1",
+    "eslint": "10.10.0",
     "eslint-config-prettier": "10.1.8",
-    "prettier": "3.6.2",
-    "prisma": "6.19.3",
-    "tsx": "4.20.6",
-    "typescript": "5.9.3",
-    "typescript-eslint": "8.46.3",
-    "vitest": "3.2.7"
+    "prettier": "3.9.6",
+    "prisma": "7.10.0",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2",
+    "typescript-eslint": "8.70.0",
+    "vitest": "5.0.0"
   }
 }
