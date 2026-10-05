@@ -18,6 +18,6 @@
   "dependencies": {
     "@aasp/scope-engine": "workspace:*",
     "cheerio": "1.2.0",
-    "fast-xml-parser": "5.11.1"
+    "fast-xml-parser": "5.11.2"
   }
 }
