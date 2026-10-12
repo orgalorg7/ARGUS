@@ -1,4 +1,4 @@
-FROM node:24.11.0-bookworm-slim AS build
+FROM node:26.11.1-bookworm-slim AS build
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl && \
     rm -rf /var/lib/apt/lists/*
@@ -20,7 +20,7 @@ RUN --mount=type=cache,id=aasp-pnpm-store,target=/pnpm/store \
 RUN pnpm prisma:generate
 RUN pnpm build
 
-FROM node:24.11.0-bookworm-slim AS runtime
+FROM node:26.11.1-bookworm-slim AS runtime
 ENV NODE_ENV=production
 ENV COREPACK_HOME=/opt/corepack
 WORKDIR /app
