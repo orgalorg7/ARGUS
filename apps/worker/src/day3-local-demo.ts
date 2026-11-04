@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { AsynchronousCrawler } from "@aasp/crawler";
+import { analyzeSafeApplicationInputs, ApplicationSurfaceScanner } from "@aasp/scanner-application";
 import { AuthenticationSurfaceScanner } from "@aasp/scanner-auth-surface";
 import { CookieSecurityScanner } from "@aasp/scanner-cookies";
 import { analyzeCors } from "@aasp/scanner-cors";
@@ -51,6 +52,7 @@ const passive = runPassiveAdapters(
     new CookieSecurityScanner(),
     new AuthenticationSurfaceScanner(),
     new MisconfigurationScanner(),
+    new ApplicationSurfaceScanner(),
   ],
   exchanges,
 );
@@ -62,7 +64,16 @@ const active = await analyzeCors(client, corsUrls, {
   maxRequests: 10,
   requestsPerSecond: 10,
 });
-const observations = [...passive, ...active.observations];
+const applicationActive = await analyzeSafeApplicationInputs(
+  client,
+  crawl.pages.flatMap((page) => [page.url, page.finalUrl]),
+  {
+    timeoutMs: 5_000,
+    maxRequests: 20,
+    requestsPerSecond: 10,
+  },
+);
+const observations = [...passive, ...active.observations, ...applicationActive.observations];
 const counts = Object.fromEntries(
   [...new Set(observations.map((item) => item.observationType))]
     .sort()
@@ -78,8 +89,10 @@ const artifact = {
     failures: crawl.failures,
   },
   safeActive: {
-    requestsMade: active.requestsMade,
-    failures: active.failures,
+    requestsMade: active.requestsMade + applicationActive.requestsMade,
+    corsRequestsMade: active.requestsMade,
+    applicationRequestsMade: applicationActive.requestsMade,
+    failures: [...active.failures, ...applicationActive.failures],
   },
   observationCount: observations.length,
   observationTypeCounts: counts,
@@ -90,5 +103,5 @@ await mkdir(artifactDirectory, { recursive: true });
 const artifactPath = resolve(artifactDirectory, "day3-scanner-observations.json");
 await writeFile(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
 process.stdout.write(
-  `${JSON.stringify({ artifactPath, ...artifact.crawl, safeActiveRequests: active.requestsMade, observationCount: observations.length, observationTypeCounts: counts })}\n`,
+  `${JSON.stringify({ artifactPath, ...artifact.crawl, safeActiveRequests: artifact.safeActive.requestsMade, observationCount: observations.length, observationTypeCounts: counts })}\n`,
 );

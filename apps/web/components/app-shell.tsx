@@ -7,8 +7,10 @@ export function AppShell({
   children,
 }: Readonly<{ workspaceId: string; children: React.ReactNode }>) {
   const links = [
+    ["Engagements", "/engagements"],
     ["Scans", "/scans"],
     ["Targets", "/targets"],
+    ["Authorization", "/authorization"],
     ["Audit", "/audit"],
     ["Settings", "/settings"],
   ] as const;
@@ -16,8 +18,8 @@ export function AppShell({
     <>
       <header className="topbar">
         <div className="shell topbar-inner">
-          <Link className="brand" href={workspaceHref("/scans", workspaceId)}>
-            AASP / Assessment console
+          <Link className="brand" href={workspaceHref("/engagements", workspaceId)}>
+            AASP / Operations
           </Link>
           <nav>
             {links.map(([label, href]) => (

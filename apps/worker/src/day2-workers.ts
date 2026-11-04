@@ -1,3 +1,4 @@
+import { executionRequestGuard } from "@aasp/engagement-engine";
 import type { Prisma, PrismaClient, ScanState as ScanStateType } from "@aasp/database";
 import { JobStatus, ScanState, StageStatus, TargetStatus } from "@aasp/database";
 import { discoverApiEndpoints } from "@aasp/api-discovery";
@@ -433,7 +434,9 @@ export function startDay2Workers(context: WorkerContext): Day2WorkerRuntime {
       await markJobRunning(prisma, job, ScanState.DISCOVERY, workerId);
       const pageEvidence: Record<string, string[]> = {};
       const crawler = new AsynchronousCrawler(
-        new ScopedHttpClient(new ScopeEngine(), policyFor(scan)),
+        new ScopedHttpClient(new ScopeEngine(), policyFor(scan), {
+          beforeRequest: executionRequestGuard(prisma, scan.workspaceId, scan.id, "DISCOVERY"),
+        }),
         {
           maxDepth: 0,
           maxUrls: Math.min(scan.config.maxUrls, 10),
@@ -523,7 +526,9 @@ export function startDay2Workers(context: WorkerContext): Day2WorkerRuntime {
       await markJobRunning(prisma, job, ScanState.CRAWLING, workerId);
       const pageEvidence: Record<string, string[]> = { ...job.data.pageEvidence };
       const crawler = new AsynchronousCrawler(
-        new ScopedHttpClient(new ScopeEngine(), policyFor(scan)),
+        new ScopedHttpClient(new ScopeEngine(), policyFor(scan), {
+          beforeRequest: executionRequestGuard(prisma, scan.workspaceId, scan.id, "DISCOVERY"),
+        }),
         {
           maxDepth: scan.config.crawlDepth,
           maxUrls: scan.config.maxUrls,

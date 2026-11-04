@@ -1,10 +1,10 @@
 # Authorized AI Security Assessment Platform
 
-Production-oriented MVP implementation for controlled, evidence-backed assessment of explicitly authorized web targets. The governing contract is `CODEX_MISSION_AUTHORIZED_AI_SECURITY_PLATFORM.md`.
+An engagement-governed foundation for a pentest operating system, built on the existing assessment pipeline. The current scope, security boundaries and remaining commercial-platform work are documented in [the foundation delivery record](docs/FOUNDATION.md) and [repository intelligence map](docs/REPO_INTELLIGENCE.md).
 
 ## Current delivery state
 
-Days 1 through 7 are implemented: monorepo tooling, Prisma data model and migrations, authentication/RBAC, target-specific scope configuration, SSRF/DNS-rebinding/redirect defenses, persisted BullMQ orchestration, scope-guarded discovery, evidence persistence, deterministic scanners, finding correlation, evidence-gated Qwen integration, professional reports, the complete dashboard, cancellation, owned fixtures, hardened containers, clean-install acceptance, tenant-isolation acceptance, and notebooks 00-11.
+The existing pipeline is extended with organizations, clients, engagements, versioned rules of engagement, encrypted authorization originals, revocable grants, server-enforced lifecycle transitions, and durable execution decisions. Both queue admission and worker transport enforce current permission and authorization. The UI supports this workflow. Findings and generated reports remain internal working artifacts; reviewer publication, client portal and the broader intelligence system are subsequent increments.
 
 The deterministic authorized pipeline and report path run end to end. With no Qwen provider configured, AI analysis is explicitly degraded and reports use preserved deterministic findings. A configured but temporarily unreachable provider pauses at `AI_ANALYSIS_WAITING_FOR_PROVIDER`. A validated Qwen-backed run remains outstanding until Colab/GPU is connected; no model output is synthesized.
 
@@ -19,9 +19,11 @@ packages/schemas         Validated cross-service contracts
 packages/security-core   Authorization, state, redaction, integrity primitives
 packages/logger          Structured JSON logging
 services/scope-engine    Scope validation and pinned outbound HTTP client
+services/engagement-engine Tenant permissions, engagement lifecycle, custody and execution policy
 services/crawler         Asynchronous discovery and crawl-trap controls
 services/api-discovery   OpenAPI, form, route, and GraphQL-surface extraction
 services/evidence-engine Redaction, integrity hashing, and observation persistence
+services/authorization-engine Isolated identities, resource ownership, differential authorization analysis
 services/finding-engine Deterministic observation normalization and scoring
 services/correlation-engine Evidence-preserving finding deduplication
 services/ai-engine       Private Qwen client, prompt boundaries, schema/grounding validation
@@ -43,13 +45,27 @@ cp .env.example .env
 openssl rand -base64 48
 ```
 
-Put the generated value in `JWT_SECRET`, set an `ADMIN_PASSWORD` of at least 16 characters, then run:
+Put the generated value in `JWT_SECRET`, set an `ADMIN_PASSWORD` of at least 16 characters, and generate a separate `openssl rand -base64 32` value for `EVIDENCE_ENCRYPTION_KEY`. This key encrypts authorization originals; preserve it with protected backups. Then run:
 
 ```bash
 docker compose up --build
 ```
 
 Open `http://localhost:3000` and sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. The API health endpoint is `http://localhost:3001/api/health`.
+
+For a one-command CPU-only startup that does not require Colab or Qwen:
+
+```bash
+bash scripts/run-local-platform.sh start
+```
+
+To start the stack and execute a real `DEEP_SAFE` end-to-end acceptance scan against the owned Docker fixture:
+
+```bash
+bash scripts/run-local-platform.sh test
+```
+
+The script generates a private ignored `.env.aasp-cpu`, prints the local login, waits for API/frontend health, validates evidence-backed findings and all report layers, and copies the resulting reports into `reports/<scan-id>/`. Qwen is explicitly reported as `NOT_CONFIGURED`; deterministic scanning is not replaced with mock AI output. Use `status`, `logs`, `credentials`, and `stop` as additional commands.
 
 To run JavaScript tooling outside containers:
 
@@ -66,12 +82,14 @@ pnpm build
 
 1. Sign in and create a workspace.
 2. Register a target and save its allowed domains, ports, subdomain policy, excluded paths, and private-network policy. A valid saved scope moves the target to `READY`; no external ownership challenge is performed.
-3. Create a scan with `POST /api/workspaces/:workspaceId/scans`.
-4. Start it with `POST /api/workspaces/:workspaceId/scans/:scanId/start`.
+3. Open **Engagements**, create the client and engagement, configure scope/ROE, and upload and record the client's authorization. Move the engagement through its server-enforced lifecycle into TESTING.
+4. Create a scan with `POST /api/workspaces/:workspaceId/scans`, supplying its `engagementId`, then start it with `POST /api/workspaces/:workspaceId/scans/:scanId/start`.
 5. Observe persisted discovery, crawling, analysis, normalization, correlation, Qwen, and report stages.
 6. Retrieve correlated findings and open the complete and per-finding reports. Without a provider, reports explicitly record degraded AI coverage.
 
-Authorization to assess the target must already exist through the organization's engagement process. The platform enforces the saved scope before every outbound request and blocks redirects to destinations outside it.
+For authenticated authorization testing, open **Authorization**, select a target, then configure legitimate test identities, approved seed resources, and expected-policy test cases before starting the scan. See [`docs/AUTHORIZATION_TESTING.md`](docs/AUTHORIZATION_TESTING.md).
+
+Authorization must be recorded against the current engagement policy before execution. The platform enforces scope, current authorization, tester permission, ROE and shared request limits before each worker request, including redirects. Legacy scans are retained as history and are not automatically authorized.
 
 The standalone Day 2 crawler demonstration can be run without PostgreSQL/Redis:
 

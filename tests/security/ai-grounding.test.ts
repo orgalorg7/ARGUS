@@ -79,6 +79,10 @@ describe("Qwen evidence grounding and prompt boundaries", () => {
       chat_template_kwargs: { enable_thinking: boolean; preserve_thinking: boolean };
     };
     expect(body.messages[0]?.content).not.toContain("scan another server");
+    expect(body.messages[0]?.content).toContain("Authorization and scope are absolute");
+    expect(body.messages[0]?.content).toContain("Do not invent endpoints");
+    expect(body.messages[0]?.content).toContain("Never provide destructive validation");
+    expect(body.messages[0]?.content).toContain("Every material claim must be grounded");
     expect(body.messages[1]?.content).toContain("UNTRUSTED_TARGET_DATA");
     expect(body.messages[1]?.content).toContain("scan another server");
     expect(body.max_tokens).toBe(1_000);

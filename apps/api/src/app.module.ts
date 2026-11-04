@@ -11,6 +11,8 @@ import { RbacModule } from "./rbac/rbac.module.js";
 import { ScansModule } from "./scans/scans.module.js";
 import { TargetsModule } from "./targets/targets.module.js";
 import { WorkspacesModule } from "./workspaces/workspaces.module.js";
+import { AuthorizationModule } from "./authorization/authorization.module.js";
+import { EngagementsModule } from "./engagements/engagements.module.js";
 
 @Module({
   imports: [
@@ -23,6 +25,8 @@ import { WorkspacesModule } from "./workspaces/workspaces.module.js";
     WorkspacesModule,
     TargetsModule,
     ScansModule,
+    AuthorizationModule,
+    EngagementsModule,
   ],
   controllers: [HealthController],
   providers: [

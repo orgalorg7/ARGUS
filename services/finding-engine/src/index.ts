@@ -255,6 +255,90 @@ const definitions: Readonly<Record<string, FindingDefinition>> = {
     remediation:
       "Do not combine wildcard origins with credential allowance. Use explicit trusted origins or disable credentials.",
   },
+  FORM_CSRF_PROTECTION_NOT_OBSERVED: {
+    title: "Anti-CSRF control not observed in state-changing form",
+    category: "CSRF_PROTECTION",
+    severity: "LOW",
+    confidence: 0.48,
+    cwe: ["CWE-352"],
+    owasp: ["A01:2021-Broken Access Control"],
+    description:
+      "A state-changing HTML form did not contain a field name recognizable as an anti-CSRF token. This passive observation cannot determine whether Origin, Referer, custom-header, or server-side controls provide equivalent protection.",
+    technicalImpact:
+      "If the action relies on ambient credentials and no compensating request-origin control exists, another origin may be able to induce an unwanted request.",
+    businessImpact:
+      "An affected authenticated workflow could permit unintended account or data changes in a victim's session.",
+    remediation:
+      "Verify the endpoint's complete CSRF defense. Use an unpredictable server-validated token for browser form submissions, validate request origin where appropriate, and apply suitable SameSite cookie policy.",
+    manualVerificationRequired: true,
+  },
+  INPUT_REFLECTION_OBSERVED: {
+    title: "Untrusted query input reflected in response",
+    category: "INPUT_REFLECTION",
+    severity: "LOW",
+    confidence: 0.52,
+    cwe: ["CWE-79", "CWE-116"],
+    owasp: ["A03:2021-Injection"],
+    description:
+      "An inert, non-executable marker supplied through a query parameter was returned in the response. Reflection alone does not prove cross-site scripting or unsafe output encoding.",
+    technicalImpact:
+      "If the value reaches an executable browser context without context-appropriate encoding, an attacker-controlled URL may influence client-side content or script behavior.",
+    businessImpact:
+      "A separately confirmed script-injection path could affect users who follow a crafted link, including account actions or disclosure of browser-accessible data.",
+    remediation:
+      "Apply context-specific output encoding, avoid unsafe HTML or script construction, validate expected input types, and verify the reflected context through authorized manual testing.",
+    manualVerificationRequired: true,
+  },
+  OPEN_REDIRECT_CONFIRMED: {
+    title: "External open redirect observed",
+    category: "OPEN_REDIRECT",
+    severity: "MEDIUM",
+    confidence: 0.96,
+    cwe: ["CWE-601"],
+    owasp: ["A01:2021-Broken Access Control"],
+    description:
+      "A navigation parameter accepted a harmless external destination and the response returned that destination in its Location header. The scanner did not follow the external redirect.",
+    technicalImpact:
+      "Trusted application links can redirect users to an attacker-controlled origin, enabling convincing phishing chains and potentially weakening OAuth or authentication flows when the same handler is reused.",
+    businessImpact:
+      "Users may trust a branded link that ultimately sends them to a fraudulent destination, increasing credential-theft and reputation risk.",
+    remediation:
+      "Use server-side identifiers or an exact allowlist of permitted destinations. Resolve and canonicalize relative paths, reject absolute untrusted URLs, and bind OAuth redirect URIs exactly.",
+    discriminatorMetadataKey: "probeDestination",
+  },
+  CLIENT_SECRET_PATTERN_OBSERVED: {
+    title: "Probable secret material embedded in client-side code",
+    category: "CLIENT_SIDE_SECRET_EXPOSURE",
+    severity: "MEDIUM",
+    confidence: 0.74,
+    cwe: ["CWE-798", "CWE-200"],
+    owasp: ["A07:2021-Identification and Authentication Failures"],
+    description:
+      "A client-side resource contained text matching a high-specificity secret format. The value was redacted immediately and was not retained in finding evidence.",
+    technicalImpact:
+      "Any credential delivered to a browser must be considered publicly retrievable. Practical impact depends on whether the value is active and what permissions it grants.",
+    businessImpact:
+      "An active privileged credential could permit unauthorized use of a third-party service, data access, or unexpected service cost.",
+    remediation:
+      "Revoke and rotate the suspected credential, inspect its use logs, remove it from client artifacts and history, and move privileged operations behind an authenticated server-side boundary.",
+    manualVerificationRequired: true,
+    discriminatorMetadataKey: "secretType",
+  },
+  MIXED_CONTENT_REFERENCE_OBSERVED: {
+    title: "HTTPS page references an insecure HTTP resource",
+    category: "MIXED_CONTENT",
+    severity: "LOW",
+    confidence: 0.9,
+    cwe: ["CWE-319"],
+    owasp: ["A02:2021-Cryptographic Failures"],
+    description: "An HTTPS document contained an explicit HTTP resource reference.",
+    technicalImpact:
+      "Depending on resource type and browser behavior, the resource may be blocked or exposed to network modification, weakening transport integrity.",
+    businessImpact:
+      "Broken resources or modifiable passive content can reduce user trust and may create a path to content manipulation.",
+    remediation:
+      "Serve every page dependency over HTTPS, replace explicit HTTP URLs, and use Content-Security-Policy upgrade-insecure-requests only as defense in depth.",
+  },
   SOURCE_MAP_PUBLICLY_ACCESSIBLE: {
     title: "Client source map publicly accessible",
     category: "SOURCE_CODE_INFORMATION_DISCLOSURE",
@@ -286,6 +370,74 @@ const definitions: Readonly<Record<string, FindingDefinition>> = {
     remediation:
       "Return generic external error responses, retain detailed diagnostics only in access-controlled server logs, and remove debug modes from production.",
   },
+  POTENTIAL_HORIZONTAL_AUTHORIZATION_FAILURE: {
+    title: "Potential horizontal object-authorization failure",
+    category: "BROKEN_OBJECT_LEVEL_AUTHORIZATION",
+    severity: "HIGH",
+    confidence: 0.7,
+    cwe: ["CWE-639"],
+    owasp: ["A01:2021-Broken Access Control", "API1:2023-Broken Object Level Authorization"],
+    description:
+      "A same-role non-owner identity received behavior structurally equivalent to the approved owner baseline despite an explicit DENY policy.",
+    technicalImpact:
+      "A user may be able to access an object owned by another authorized test identity at the same privilege level.",
+    businessImpact:
+      "Horizontal access-control failure can expose or permit actions on another user's records within the tested boundary.",
+    remediation:
+      "Enforce object ownership or explicit sharing authorization server-side on every object operation, derive the caller from the authenticated session, and add owner/non-owner regression tests.",
+    discriminatorMetadataKey: "groupedFindingFingerprint",
+  },
+  POTENTIAL_VERTICAL_AUTHORIZATION_FAILURE: {
+    title: "Potential vertical function-authorization failure",
+    category: "BROKEN_FUNCTION_LEVEL_AUTHORIZATION",
+    severity: "HIGH",
+    confidence: 0.7,
+    cwe: ["CWE-862"],
+    owasp: ["A01:2021-Broken Access Control", "API5:2023-Broken Function Level Authorization"],
+    description:
+      "A lower-privileged identity received behavior structurally equivalent to the higher-privileged baseline despite an explicit DENY policy.",
+    technicalImpact:
+      "A lower-privileged account may invoke functionality reserved for a more privileged role.",
+    businessImpact:
+      "Role-boundary failure can permit unauthorized administrative or management actions in the affected workflow.",
+    remediation:
+      "Centralize server-side role and permission checks at the operation boundary, deny by default, and add lower-role versus privileged-role regression tests.",
+    discriminatorMetadataKey: "groupedFindingFingerprint",
+  },
+  POTENTIAL_TENANT_ISOLATION_FAILURE: {
+    title: "Potential cross-tenant authorization failure",
+    category: "TENANT_ISOLATION",
+    severity: "HIGH",
+    confidence: 0.72,
+    cwe: ["CWE-639"],
+    owasp: ["A01:2021-Broken Access Control", "API1:2023-Broken Object Level Authorization"],
+    description:
+      "An identity belonging to another configured tenant received behavior structurally equivalent to the authorized tenant baseline despite an explicit DENY policy.",
+    technicalImpact:
+      "Tenant scoping may not be consistently applied when resolving or authorizing the affected resource.",
+    businessImpact:
+      "Cross-tenant isolation failure can expose client data across organizational boundaries.",
+    remediation:
+      "Bind every resource query and authorization decision to the authenticated tenant, reject caller-supplied tenant authority, and add cross-tenant negative tests.",
+    discriminatorMetadataKey: "groupedFindingFingerprint",
+  },
+  AUTHENTICATION_STATE_INCONSISTENCY: {
+    title: "Potential unauthenticated access inconsistency",
+    category: "AUTHENTICATION_ENFORCEMENT",
+    severity: "HIGH",
+    confidence: 0.7,
+    cwe: ["CWE-306"],
+    owasp: ["A07:2021-Identification and Authentication Failures"],
+    description:
+      "The isolated anonymous identity received behavior structurally equivalent to an authenticated baseline despite an explicit DENY policy.",
+    technicalImpact:
+      "The endpoint may expose authenticated behavior without a valid authenticated session.",
+    businessImpact:
+      "Unauthenticated access may expose account or business data to arbitrary external users.",
+    remediation:
+      "Require authentication at the server-side route boundary, fail closed when session validation fails, and add anonymous negative regression tests.",
+    discriminatorMetadataKey: "groupedFindingFingerprint",
+  },
 };
 
 function metadataRecord(value: unknown): Record<string, unknown> {
@@ -311,12 +463,17 @@ export function normalizeObservation(
     ? metadata[definition.discriminatorMetadataKey]
     : null;
   const severity = normalizeSeverity(observation.rawSeverity, definition.severity);
+  const observedConfidence = metadata["confidence"];
+  const confidence =
+    typeof observedConfidence === "number" && observedConfidence >= 0 && observedConfidence <= 1
+      ? observedConfidence
+      : definition.confidence;
   const manualVerificationRequired = definition.manualVerificationRequired ?? false;
   const base = canonicalFindingSchema.parse({
     title: definition.title,
     category: definition.category,
     severity,
-    confidence: Math.min(0.99, definition.confidence + Math.min(0.03, evidenceIds.length * 0.01)),
+    confidence: Math.min(0.99, confidence + Math.min(0.03, evidenceIds.length * 0.01)),
     status: manualVerificationRequired ? "MANUAL_VERIFICATION_REQUIRED" : "OPEN",
     cwe: definition.cwe,
     owasp: definition.owasp,

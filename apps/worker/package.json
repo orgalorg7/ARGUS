@@ -14,6 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@aasp/authorization-engine": "workspace:*",
     "@aasp/ai-engine": "workspace:*",
     "@aasp/api-discovery": "workspace:*",
     "@aasp/crawler": "workspace:*",
@@ -22,7 +23,9 @@
     "@aasp/evidence-engine": "workspace:*",
     "@aasp/finding-engine": "workspace:*",
     "@aasp/logger": "workspace:*",
+    "@aasp/longitudinal-engine": "workspace:*",
     "@aasp/report-engine": "workspace:*",
+    "@aasp/scanner-application": "workspace:*",
     "@aasp/scanner-auth-surface": "workspace:*",
     "@aasp/scanner-cookies": "workspace:*",
     "@aasp/scanner-cors": "workspace:*",
@@ -36,6 +39,7 @@
     "@aasp/security-core": "workspace:*",
     "@aasp/technology-fingerprinter": "workspace:*",
     "bullmq": "6.3.2",
-    "ioredis": "5.8.2"
+    "ioredis": "5.8.2",
+    "@aasp/engagement-engine": "workspace:*"
   }
 }

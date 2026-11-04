@@ -180,6 +180,76 @@ export function normalizeAssessmentUrl(input: string): URL {
   return parsed;
 }
 
+export function assertDestinationAllowed(input: string | URL, policy: ScopePolicy): URL {
+  const url = normalizeAssessmentUrl(input instanceof URL ? input.toString() : input);
+  const target = normalizeAssessmentUrl(policy.targetOrigin);
+  const hostname = normalizeHostname(url.hostname);
+  const targetHostname = normalizeHostname(target.hostname);
+  const allowedDomains = (policy.allowedDomains ?? [targetHostname]).map(normalizeHostname);
+
+  if (forbiddenHostnames.has(hostname) && !policy.allowPrivateNetwork) {
+    throw new ScopeViolationError(
+      "ADDRESS_BLOCKED",
+      `Hostname ${hostname} is blocked.`,
+      url.toString(),
+    );
+  }
+
+  const exactHost = allowedDomains.includes(hostname);
+  const authorizedSubdomain =
+    policy.includeSubdomains &&
+    allowedDomains.some((allowedDomain) => hostname.endsWith(`.${allowedDomain}`));
+  if (!exactHost && !authorizedSubdomain) {
+    throw new ScopeViolationError(
+      "HOST_NOT_AUTHORIZED",
+      `Host ${hostname} is outside authorized scope.`,
+      url.toString(),
+    );
+  }
+
+  const port = effectivePort(url);
+  const targetPort = effectivePort(target);
+  const allowedPorts = new Set(policy.allowedPorts ?? [targetPort]);
+  if (!allowedPorts.has(port)) {
+    throw new ScopeViolationError(
+      "PORT_NOT_AUTHORIZED",
+      `Port ${port} is outside authorized scope.`,
+      url.toString(),
+    );
+  }
+
+  let decodedPath = url.pathname;
+  try {
+    for (let depth = 0; depth < 5; depth += 1) {
+      const decoded = decodeURIComponent(decodedPath);
+      if (decoded === decodedPath) break;
+      decodedPath = decoded;
+    }
+    if (decodedPath.includes("%") || decodedPath.includes("\\") || decodedPath.includes("\u0000"))
+      throw new Error("Ambiguous path");
+  } catch {
+    throw new ScopeViolationError(
+      "PATH_EXCLUDED",
+      "Ambiguous path encoding is prohibited.",
+      url.toString(),
+    );
+  }
+  const canonicalPath = new URL(decodedPath, url.origin).pathname;
+  if (
+    (policy.excludedPathPrefixes ?? []).some((prefix) =>
+      [url.pathname, decodedPath, canonicalPath].some((path) => path.startsWith(prefix)),
+    )
+  ) {
+    throw new ScopeViolationError(
+      "PATH_EXCLUDED",
+      `Path ${url.pathname} is excluded from scope.`,
+      url.toString(),
+    );
+  }
+
+  return url;
+}
+
 export class ScopeEngine {
   constructor(
     private readonly resolver: HostResolver = new SystemHostResolver(),
@@ -187,50 +257,8 @@ export class ScopeEngine {
   ) {}
 
   async assertAllowed(input: string | URL, policy: ScopePolicy): Promise<ScopeDecision> {
-    const url = normalizeAssessmentUrl(input instanceof URL ? input.toString() : input);
-    const target = normalizeAssessmentUrl(policy.targetOrigin);
+    const url = assertDestinationAllowed(input, policy);
     const hostname = normalizeHostname(url.hostname);
-    const targetHostname = normalizeHostname(target.hostname);
-    const allowedDomains = (policy.allowedDomains ?? [targetHostname]).map(normalizeHostname);
-
-    if (forbiddenHostnames.has(hostname) && !policy.allowPrivateNetwork) {
-      throw new ScopeViolationError(
-        "ADDRESS_BLOCKED",
-        `Hostname ${hostname} is blocked.`,
-        url.toString(),
-      );
-    }
-
-    const exactHost = allowedDomains.includes(hostname);
-    const authorizedSubdomain =
-      policy.includeSubdomains &&
-      allowedDomains.some((allowedDomain) => hostname.endsWith(`.${allowedDomain}`));
-    if (!exactHost && !authorizedSubdomain) {
-      throw new ScopeViolationError(
-        "HOST_NOT_AUTHORIZED",
-        `Host ${hostname} is outside authorized scope.`,
-        url.toString(),
-      );
-    }
-
-    const port = effectivePort(url);
-    const targetPort = effectivePort(target);
-    const allowedPorts = new Set(policy.allowedPorts ?? [targetPort]);
-    if (!allowedPorts.has(port)) {
-      throw new ScopeViolationError(
-        "PORT_NOT_AUTHORIZED",
-        `Port ${port} is outside authorized scope.`,
-        url.toString(),
-      );
-    }
-
-    if ((policy.excludedPathPrefixes ?? []).some((prefix) => url.pathname.startsWith(prefix))) {
-      throw new ScopeViolationError(
-        "PATH_EXCLUDED",
-        `Path ${url.pathname} is excluded from scope.`,
-        url.toString(),
-      );
-    }
 
     let addresses: ResolvedAddress[];
     try {

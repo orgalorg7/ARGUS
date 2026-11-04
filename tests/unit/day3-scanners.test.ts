@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { analyzeSafeApplicationInputs, ApplicationSurfaceScanner } from "@aasp/scanner-application";
 import { AuthenticationSurfaceScanner } from "@aasp/scanner-auth-surface";
 import { CookieSecurityScanner, parseSetCookie } from "@aasp/scanner-cookies";
 import { analyzeCors } from "@aasp/scanner-cors";
@@ -80,6 +81,56 @@ describe("Day 3 deterministic scanners", () => {
     expect(result[0]?.metadata).toMatchObject({ surfaceType: "LOGIN_OR_SESSION" });
   });
 
+  it("records forms and conservatively flags missing observable CSRF fields", () => {
+    const results = new ApplicationSurfaceScanner().analyze([
+      exchange({
+        body: '<form method="post" action="/account/email"><input name="email"></form>',
+      }),
+    ]);
+    expect(results.map((item) => item.observationType)).toEqual([
+      "FORM_INPUT_SURFACE_OBSERVED",
+      "FORM_CSRF_PROTECTION_NOT_OBSERVED",
+    ]);
+    expect(results[1]?.metadata).toMatchObject({ formMethod: "POST" });
+  });
+
+  it("does not flag a form with an observable anti-CSRF field", () => {
+    const results = new ApplicationSurfaceScanner().analyze([
+      exchange({
+        body: '<form method="post"><input type="hidden" name="csrf_token"><input name="email"></form>',
+      }),
+    ]);
+    expect(results.map((item) => item.observationType)).toEqual(["FORM_INPUT_SURFACE_OBSERVED"]);
+  });
+
+  it("classifies client sinks without claiming executable data flow", () => {
+    const results = new ApplicationSurfaceScanner().analyze([
+      exchange({
+        finalUrl: "https://fixture.test/assets/app.js",
+        headers: { "content-type": "application/javascript" },
+        body: 'element.innerHTML = value; const socket = "wss://fixture.test/events";',
+      }),
+    ]);
+    expect(results.map((item) => item.observationType)).toEqual([
+      "UNSAFE_DOM_SINK_INDICATOR",
+      "WEBSOCKET_ENDPOINT_OBSERVED",
+    ]);
+    expect(results[0]?.evidence[0]?.excerpt).toContain("Data flow was not proven");
+  });
+
+  it("redacts WebSocket query values from client evidence", () => {
+    const results = new ApplicationSurfaceScanner().analyze([
+      exchange({
+        finalUrl: "https://fixture.test/assets/socket.js",
+        headers: { "content-type": "application/javascript" },
+        body: 'const socket = "wss://fixture.test/events?token=do-not-retain";',
+      }),
+    ]);
+    expect(results[0]?.observationType).toBe("WEBSOCKET_ENDPOINT_OBSERVED");
+    expect(JSON.stringify(results)).not.toContain("do-not-retain");
+    expect(JSON.stringify(results)).toContain("%5BREDACTED%5D");
+  });
+
   it("requires response evidence for verbose errors and source maps", () => {
     const results = new MisconfigurationScanner().analyze([
       exchange({
@@ -123,5 +174,78 @@ describe("Day 3 deterministic scanners", () => {
     });
     expect(calls).toEqual([{ url: "https://fixture.test/cors", method: "GET" }]);
     expect(result.observations[0]?.observationType).toBe("CORS_ARBITRARY_ORIGIN_WITH_CREDENTIALS");
+  });
+
+  it("confirms an open redirect without following the external destination", async () => {
+    const calls: string[] = [];
+    const client = {
+      request(url: string): Promise<ScopedResponse> {
+        calls.push(url);
+        return Promise.resolve({
+          requestedUrl: url,
+          finalUrl: url,
+          statusCode: 302,
+          headers: { location: "https://aasp-redirect-check.invalid/authorized-assessment" },
+          body: Buffer.alloc(0),
+          redirects: [],
+        });
+      },
+    } as ScopedHttpClient;
+    const result = await analyzeSafeApplicationInputs(
+      client,
+      ["https://fixture.test/redirect?next=%2Fhome"],
+      { timeoutMs: 1_000, maxRequests: 1, requestsPerSecond: 10 },
+    );
+    expect(calls).toHaveLength(1);
+    expect(result.requestsMade).toBe(1);
+    expect(result.observations[0]?.observationType).toBe("OPEN_REDIRECT_CONFIRMED");
+    expect(result.observations[0]?.evidence[0]?.requestMetadata).toMatchObject({
+      followRedirects: false,
+    });
+  });
+
+  it("uses only an inert marker when observing query reflection", async () => {
+    const client = {
+      request(url: string): Promise<ScopedResponse> {
+        const marker = new URL(url).searchParams.get("q") ?? "";
+        return Promise.resolve({
+          requestedUrl: url,
+          finalUrl: url,
+          statusCode: 200,
+          headers: { "content-type": "text/html" },
+          body: Buffer.from(`<p>${marker}</p>`),
+          redirects: [],
+        });
+      },
+    } as ScopedHttpClient;
+    const result = await analyzeSafeApplicationInputs(
+      client,
+      ["https://fixture.test/search?q=ok"],
+      {
+        timeoutMs: 1_000,
+        maxRequests: 1,
+        requestsPerSecond: 10,
+      },
+    );
+    expect(result.observations[0]?.observationType).toBe("INPUT_REFLECTION_OBSERVED");
+    expect(result.observations[0]?.metadata).toMatchObject({ executablePayloadUsed: false });
+    expect(JSON.stringify(result)).not.toContain("<script>");
+  });
+
+  it("does not actively probe URLs containing sensitive query parameters", async () => {
+    let called = false;
+    const client = {
+      request(): Promise<ScopedResponse> {
+        called = true;
+        throw new Error("request must not be issued");
+      },
+    } as ScopedHttpClient;
+    const result = await analyzeSafeApplicationInputs(
+      client,
+      ["https://fixture.test/callback?access_token=secret&q=value"],
+      { timeoutMs: 1_000, maxRequests: 2, requestsPerSecond: 10 },
+    );
+    expect(called).toBe(false);
+    expect(result).toMatchObject({ observations: [], requestsMade: 0, failures: [] });
   });
 });

@@ -22,14 +22,17 @@ function inV4Cidr(address: string, network: string, prefix: number): boolean {
   return (ip & mask) === (base & mask);
 }
 
-function normalizedV6(address: string): string {
-  return address.toLowerCase().split("%")[0] ?? address.toLowerCase();
-}
-
-function mappedV4(address: string): string | undefined {
-  const value = normalizedV6(address);
-  const match = /^(?:::ffff:)(\d{1,3}(?:\.\d{1,3}){3})$/.exec(value);
-  return match?.[1];
+function v6Number(address: string): bigint {
+  // WHATWG canonicalization collapses expanded forms and converts embedded IPv4 to hex.
+  const normalized = new URL(`http://[${address}]/`).hostname.slice(1, -1);
+  const [left = "", right] = normalized.split("::");
+  const head = left ? left.split(":") : [];
+  const tail = right ? right.split(":") : [];
+  const parts =
+    right === undefined
+      ? head
+      : [...head, ...Array<string>(8 - head.length - tail.length).fill("0"), ...tail];
+  return parts.reduce((value, part) => (value << 16n) | BigInt(`0x${part}`), 0n);
 }
 
 export type AddressClassification =
@@ -46,21 +49,22 @@ export function classifyAddress(address: string): AddressClassification {
   const family = isIP(address);
   if (family === 0) return "RESERVED";
   if (family === 6) {
-    const mapped = mappedV4(address);
-    if (mapped) return classifyAddress(mapped);
-    const value = normalizedV6(address);
-    if (value === "::" || value === "0:0:0:0:0:0:0:0") return "UNSPECIFIED";
-    if (value === "::1" || value === "0:0:0:0:0:0:0:1") return "LOOPBACK";
-    if (
-      value.startsWith("fe8") ||
-      value.startsWith("fe9") ||
-      value.startsWith("fea") ||
-      value.startsWith("feb")
-    )
-      return "LINK_LOCAL";
-    if (value.startsWith("fc") || value.startsWith("fd")) return "PRIVATE";
-    if (value.startsWith("ff")) return "MULTICAST";
-    if (value.startsWith("2001:db8")) return "DOCUMENTATION";
+    if (address.includes("%")) return "RESERVED";
+    const value = v6Number(address);
+    const inRange = (network: string, prefix: number) =>
+      value >> BigInt(128 - prefix) === v6Number(network) >> BigInt(128 - prefix);
+    if (inRange("::ffff:0:0", 96)) {
+      const v4 = Number(value & 0xffffffffn);
+      return classifyAddress([v4 >>> 24, (v4 >>> 16) & 255, (v4 >>> 8) & 255, v4 & 255].join("."));
+    }
+    if (value === 0n) return "UNSPECIFIED";
+    if (value === 1n) return "LOOPBACK";
+    if (inRange("fe80::", 10)) return "LINK_LOCAL";
+    if (inRange("fc00::", 7)) return "PRIVATE";
+    if (inRange("ff00::", 8)) return "MULTICAST";
+    if (inRange("2001:db8::", 32) || inRange("3fff::", 20)) return "DOCUMENTATION";
+    // Translation/tunnel and reserved ranges are not general-purpose assessment destinations.
+    if (!inRange("2000::", 3) || inRange("2001::", 23) || inRange("2002::", 16)) return "RESERVED";
     return "PUBLIC";
   }
   if (inV4Cidr(address, "127.0.0.0", 8)) return "LOOPBACK";

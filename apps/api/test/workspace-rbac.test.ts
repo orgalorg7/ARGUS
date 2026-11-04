@@ -33,7 +33,15 @@ describe("workspace RBAC and tenant boundary", () => {
       ForbiddenException,
     );
     expect(findFirst).toHaveBeenCalledWith({
-      where: { members: { some: { workspaceId: "workspace-b", userId: "user-a" } } },
+      where: {
+        members: {
+          some: {
+            workspaceId: "workspace-b",
+            userId: "user-a",
+            workspace: { organization: { members: { some: { userId: "user-a" } } } },
+          },
+        },
+      },
     });
   });
 

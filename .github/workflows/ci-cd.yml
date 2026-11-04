@@ -27,13 +27,22 @@ jobs:
       postgres:
         image: postgres:17.6-bookworm
         env:
-          POSTGRES_DB: aasp
+          POSTGRES_DB: aasp_test
           POSTGRES_USER: aasp
           POSTGRES_PASSWORD: ci-migration-password
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U aasp -d aasp"
+          --health-cmd "pg_isready -U aasp -d aasp_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:8.2.1-bookworm
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
@@ -61,7 +70,7 @@ jobs:
 
       - name: Apply database migrations to PostgreSQL 17
         env:
-          DATABASE_URL: postgresql://aasp:ci-migration-password@127.0.0.1:5432/aasp?schema=public
+          DATABASE_URL: postgresql://aasp:ci-migration-password@127.0.0.1:5432/aasp_test?schema=public
         run: pnpm prisma:migrate
 
       - name: Check formatting
@@ -76,8 +85,24 @@ jobs:
       - name: Run unit, integration, and security tests
         run: pnpm test
 
+      - name: Test database and transport governance invariants
+        env:
+          AASP_TEST_DATABASE_URL: postgresql://aasp:ci-migration-password@127.0.0.1:5432/aasp_test?schema=public
+        run: pnpm test:database
+
+      - name: Verify upgrade preserves existing tenant data
+        env:
+          AASP_TEST_DATABASE_URL: postgresql://aasp:ci-migration-password@127.0.0.1:5432/aasp_test?schema=public
+        run: node scripts/foundation-upgrade-check.mjs
+
       - name: Build all packages and applications
         run: pnpm build
+
+      - name: Test authenticated API and real worker delivery
+        env:
+          AASP_TEST_DATABASE_URL: postgresql://aasp:ci-migration-password@127.0.0.1:5432/aasp_test?schema=public
+          AASP_TEST_REDIS_URL: redis://127.0.0.1:6379
+        run: node scripts/foundation-acceptance.mjs
 
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level high

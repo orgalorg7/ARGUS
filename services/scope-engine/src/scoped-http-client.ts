@@ -7,13 +7,23 @@ import type { ScopePolicy } from "./scope-engine.js";
 import type { ScopeEngine } from "./scope-engine.js";
 
 export interface ScopedRequestOptions {
-  method?: "GET" | "HEAD" | "OPTIONS";
+  method?: ScopedHttpMethod;
   headers?: Readonly<Record<string, string>>;
+  body?: string | Buffer;
   timeoutMs?: number;
   maxResponseBytes?: number;
   followRedirects?: boolean;
   maxRedirects?: number;
   signal?: AbortSignal;
+}
+
+export type ScopedHttpMethod = "GET" | "HEAD" | "OPTIONS" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+export interface ScopedHttpClientCapability {
+  beforeRequest?: (request: { url: URL; method: ScopedHttpMethod }) => Promise<void>;
+  /** Defaults to GET, HEAD, and OPTIONS. Broader methods must be explicitly granted. */
+  allowedMethods?: readonly ScopedHttpMethod[];
+  maxRequestBodyBytes?: number;
 }
 
 export interface ScopedResponse {
@@ -46,17 +56,39 @@ const redirectCodes = new Set([301, 302, 303, 307, 308]);
 const sensitiveHeaders = new Set(["authorization", "cookie", "proxy-authorization", "x-api-key"]);
 
 export class ScopedHttpClient {
+  readonly #allowedMethods: ReadonlySet<ScopedHttpMethod>;
+  readonly #maxRequestBodyBytes: number;
+
   constructor(
     private readonly scopeEngine: ScopeEngine,
     private readonly policy: ScopePolicy,
-  ) {}
+    private readonly capability: ScopedHttpClientCapability = {},
+  ) {
+    this.#allowedMethods = new Set(capability.allowedMethods ?? ["GET", "HEAD", "OPTIONS"]);
+    this.#maxRequestBodyBytes = capability.maxRequestBodyBytes ?? 256 * 1024;
+  }
 
   async request(url: string, options: ScopedRequestOptions = {}): Promise<ScopedResponse> {
     const method = options.method ?? "GET";
-    if (!safeMethods.has(method)) {
+    if (!safeMethods.has(method) && !this.#allowedMethods.has(method)) {
       throw new ScopeViolationError(
         "UNSAFE_METHOD",
         `HTTP method ${method} is not enabled for scoped assessment requests.`,
+        url,
+      );
+    }
+    if (!this.#allowedMethods.has(method)) {
+      throw new ScopeViolationError(
+        "METHOD_NOT_AUTHORIZED",
+        `HTTP method ${method} is not granted to this scoped client.`,
+        url,
+      );
+    }
+    const bodyBytes = options.body === undefined ? 0 : Buffer.byteLength(options.body);
+    if (bodyBytes > this.#maxRequestBodyBytes) {
+      throw new ScopeViolationError(
+        "REQUEST_BODY_TOO_LARGE",
+        `Request body exceeds the configured ${this.#maxRequestBodyBytes} byte limit.`,
         url,
       );
     }
@@ -75,6 +107,8 @@ export class ScopedHttpClient {
     const maxResponseBytes = options.maxResponseBytes ?? 5 * 1024 * 1024;
     const transport = decision.url.protocol === "https:" ? https : http;
     const selected = decision.selectedAddress;
+
+    await this.capability.beforeRequest?.({ url: decision.url, method });
 
     const result = await new Promise<
       Omit<ScopedResponse, "requestedUrl" | "finalUrl" | "redirects">
@@ -145,7 +179,7 @@ export class ScopedHttpClient {
         request.destroy(new Error(`Request timed out after ${timeoutMs} ms.`)),
       );
       request.on("error", reject);
-      request.end();
+      request.end(options.body);
     });
 
     const location = result.headers.location;

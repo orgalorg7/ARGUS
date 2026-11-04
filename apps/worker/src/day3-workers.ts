@@ -1,7 +1,9 @@
+import { executionRequestGuard } from "@aasp/engagement-engine";
 import type { Prisma, PrismaClient, ScanState as ScanStateType } from "@aasp/database";
 import { JobStatus, ScanState, StageStatus, TargetStatus } from "@aasp/database";
 import { EvidenceEngine } from "@aasp/evidence-engine";
 import { logger } from "@aasp/logger";
+import { analyzeSafeApplicationInputs, ApplicationSurfaceScanner } from "@aasp/scanner-application";
 import { AuthenticationSurfaceScanner } from "@aasp/scanner-auth-surface";
 import { CookieSecurityScanner } from "@aasp/scanner-cookies";
 import { analyzeCors } from "@aasp/scanner-cors";
@@ -36,6 +38,7 @@ const queues = {
   headers: "scan.headers",
   cookies: "scan.cookies",
   cors: "scan.cors",
+  authorization: "scan.authorization",
   normalize: "scan.normalize",
 } as const;
 
@@ -327,7 +330,11 @@ export function startDay3Workers(context: WorkerContext): Day3WorkerRuntime {
       const endpointExchanges = await loadEndpointExchanges(prisma, job.data);
       const observations = [
         ...runPassiveAdapters(
-          [new HttpSecurityScanner(), new MisconfigurationScanner()],
+          [
+            new HttpSecurityScanner(),
+            new MisconfigurationScanner(),
+            new ApplicationSurfaceScanner(),
+          ],
           exchanges,
         ),
         ...new AuthenticationSurfaceScanner().analyze([...exchanges, ...endpointExchanges]),
@@ -351,7 +358,14 @@ export function startDay3Workers(context: WorkerContext): Day3WorkerRuntime {
         await cancel(prisma, job, ScanState.PASSIVE_ANALYSIS);
         return { status: "CANCELLED" };
       }
-      const client = new ScopedHttpClient(new ScopeEngine(), scopePolicy(scan));
+      const client = new ScopedHttpClient(new ScopeEngine(), scopePolicy(scan), {
+        beforeRequest: executionRequestGuard(
+          prisma,
+          scan.workspaceId,
+          scan.id,
+          "HTTP_CONFIGURATION",
+        ),
+      });
       const observations = await analyzeTls(client, scan.target.origin, scan.config.timeoutMs);
       const count = await persistObservations(evidenceEngine, job.data, observations);
       await finishJob(prisma, job, {
@@ -468,10 +482,27 @@ export function startDay3Workers(context: WorkerContext): Day3WorkerRuntime {
             Number(new URL(right).pathname.includes("cors")) -
             Number(new URL(left).pathname.includes("cors")),
         );
-      const client = new ScopedHttpClient(new ScopeEngine(), scopePolicy(scan));
+      const client = new ScopedHttpClient(new ScopeEngine(), scopePolicy(scan), {
+        beforeRequest: executionRequestGuard(
+          prisma,
+          scan.workspaceId,
+          scan.id,
+          "HTTP_CONFIGURATION",
+        ),
+      });
       const result = await analyzeCors(client, urls, {
         timeoutMs: scan.config.timeoutMs,
         maxRequests: Math.min(remaining, 20),
+        requestsPerSecond: scan.config.requestsPerSecond,
+        isCancelled: () => isCancelled(prisma, scan.id),
+      });
+      const applicationBudget = Math.min(
+        Math.max(0, remaining - result.requestsMade),
+        scan.config.profile === "DEEP_SAFE" ? 50 : 20,
+      );
+      const applicationResult = await analyzeSafeApplicationInputs(client, urls, {
+        timeoutMs: scan.config.timeoutMs,
+        maxRequests: applicationBudget,
         requestsPerSecond: scan.config.requestsPerSecond,
         isCancelled: () => isCancelled(prisma, scan.id),
       });
@@ -479,12 +510,19 @@ export function startDay3Workers(context: WorkerContext): Day3WorkerRuntime {
         await cancel(prisma, job, ScanState.SAFE_ACTIVE_ANALYSIS);
         return { status: "CANCELLED" };
       }
-      const count = await persistObservations(evidenceEngine, job.data, result.observations);
+      const count = await persistObservations(evidenceEngine, job.data, [
+        ...result.observations,
+        ...applicationResult.observations,
+      ]);
+      const requestsMade = result.requestsMade + applicationResult.requestsMade;
+      const failures = [...result.failures, ...applicationResult.failures];
       const metadata = {
         observations: count,
-        requestsMade: result.requestsMade,
+        requestsMade,
         requestBudgetRemainingBeforeStage: remaining,
-        failures: result.failures.slice(0, 20),
+        corsRequestsMade: result.requestsMade,
+        applicationRequestsMade: applicationResult.requestsMade,
+        failures: failures.slice(0, 20),
       };
       await prisma.$transaction([
         prisma.scanJob.update({
@@ -498,22 +536,27 @@ export function startDay3Workers(context: WorkerContext): Day3WorkerRuntime {
         prisma.scanStage.update({
           where: { scanId_name: { scanId: scan.id, name: ScanState.SAFE_ACTIVE_ANALYSIS } },
           data: {
-            status: result.failures.length > 0 ? StageStatus.DEGRADED : StageStatus.COMPLETED,
+            status: failures.length > 0 ? StageStatus.DEGRADED : StageStatus.COMPLETED,
             completedAt: new Date(),
-            completedUnits: result.requestsMade,
-            totalUnits: Math.min(remaining, 20),
+            completedUnits: requestsMade,
+            totalUnits: Math.min(remaining, 20 + applicationBudget),
             metadata: jsonValue(metadata),
           },
         }),
         prisma.scan.update({
           where: { id: scan.id },
           data: {
-            state: ScanState.NORMALIZING,
-            warningCount: { increment: result.failures.length > 0 ? 1 : 0 },
+            state: ScanState.AUTHORIZATION_ANALYSIS,
+            warningCount: { increment: failures.length > 0 ? 1 : 0 },
           },
         }),
       ]);
-      const nextJobId = await enqueue(prisma, queueMap.normalize, queues.normalize, job.data);
+      const nextJobId = await enqueue(
+        prisma,
+        queueMap.authorization,
+        queues.authorization,
+        job.data,
+      );
       return { ...metadata, nextJobId };
     },
     { connection: connections[4] as Redis, concurrency: 2, lockDuration: 180_000 },

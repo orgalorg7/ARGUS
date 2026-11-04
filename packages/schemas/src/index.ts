@@ -39,6 +39,7 @@ export const scanStateSchema = z.enum([
   "FINGERPRINTING",
   "PASSIVE_ANALYSIS",
   "SAFE_ACTIVE_ANALYSIS",
+  "AUTHORIZATION_ANALYSIS",
   "NORMALIZING",
   "CORRELATING",
   "AI_ANALYSIS",
@@ -211,3 +212,4 @@ export const scannerObservationInputSchema = z
 
 export type ScannerEvidenceInput = z.infer<typeof scannerEvidenceInputSchema>;
 export type ScannerObservationInput = z.infer<typeof scannerObservationInputSchema>;
+export * from "./engagement.js";

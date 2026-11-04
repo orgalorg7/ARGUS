@@ -21,14 +21,34 @@ export class WorkspaceRbacGuard implements CanActivate {
     const user = request.user;
     if (!workspaceId || !user) throw new ForbiddenException("Workspace context is required.");
     const role = await this.prisma.role.findFirst({
-      where: { members: { some: { workspaceId, userId: user.id } } },
+      where: {
+        members: {
+          some: {
+            workspaceId,
+            userId: user.id,
+            workspace: { organization: { members: { some: { userId: user.id } } } },
+          },
+        },
+      },
     });
     if (!role) throw new ForbiddenException("Workspace access denied.");
     const allowed = this.reflector.getAllAndOverride<WorkspaceRole[]>(WORKSPACE_ROLES_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
-    if (allowed && !allowed.includes(role.name))
+    const legacyRole =
+      (
+        {
+          ORG_OWNER: "OWNER",
+          SECURITY_DIRECTOR: "ADMIN",
+          PENTEST_MANAGER: "ADMIN",
+          LEAD_PENTESTER: "ANALYST",
+          PENTESTER: "ANALYST",
+          REVIEWER: "VIEWER",
+          JUNIOR_PENTESTER: "VIEWER",
+        } as Partial<Record<WorkspaceRole, WorkspaceRole>>
+      )[role.name] ?? role.name;
+    if (!allowed || !allowed.includes(legacyRole))
       throw new ForbiddenException("Workspace role is insufficient.");
     return true;
   }

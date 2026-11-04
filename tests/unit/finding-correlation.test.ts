@@ -95,4 +95,63 @@ describe("finding normalization and correlation", () => {
     });
     expect(correlateFindings(normalizeObservations([first, second]))).toHaveLength(2);
   });
+
+  it("normalizes direct open-redirect evidence with the affected parameter", () => {
+    expect(
+      normalizeObservation(
+        observation({
+          scanner: "aasp-application-active",
+          observationType: "OPEN_REDIRECT_CONFIRMED",
+          endpoint: "/redirect",
+          parameter: "next",
+          rawSeverity: "MEDIUM",
+          metadata: { probeDestination: "https://aasp-redirect-check.invalid" },
+        }),
+      ),
+    ).toMatchObject({
+      category: "OPEN_REDIRECT",
+      severity: "MEDIUM",
+      confidence: 0.97,
+      parameter: "next",
+      manualVerificationRequired: false,
+    });
+  });
+
+  it("retains passive CSRF absence as manual verification required", () => {
+    expect(
+      normalizeObservation(
+        observation({
+          scanner: "aasp-application",
+          observationType: "FORM_CSRF_PROTECTION_NOT_OBSERVED",
+          method: "POST",
+        }),
+      ),
+    ).toMatchObject({
+      category: "CSRF_PROTECTION",
+      status: "MANUAL_VERIFICATION_REQUIRED",
+      manualVerificationRequired: true,
+    });
+  });
+
+  it("preserves authorization severity, confidence, and grouped boundary fingerprint", () => {
+    expect(
+      normalizeObservation(
+        observation({
+          scanner: "aasp-authorization-matrix",
+          observationType: "POTENTIAL_TENANT_ISOLATION_FAILURE",
+          rawSeverity: "HIGH",
+          metadata: {
+            confidence: 0.91,
+            groupedFindingFingerprint: "boundary-fingerprint",
+          },
+        }),
+      ),
+    ).toMatchObject({
+      category: "TENANT_ISOLATION",
+      severity: "HIGH",
+      confidence: 0.92,
+      cwe: ["CWE-639"],
+      correlationDiscriminator: "boundary-fingerprint",
+    });
+  });
 });

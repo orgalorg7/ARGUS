@@ -17,6 +17,7 @@ import { startDay2Workers } from "./day2-workers.js";
 import { startDay3Workers } from "./day3-workers.js";
 import { startDay4Workers } from "./day4-workers.js";
 import { startDay5Workers } from "./day5-workers.js";
+import { startAuthorizationWorkers } from "./authorization-workers.js";
 
 interface OrchestrationPayload {
   workspaceId: string;
@@ -60,6 +61,7 @@ async function registerWorker(): Promise<void> {
         "scan.headers",
         "scan.cookies",
         "scan.cors",
+        "scan.authorization",
         "scan.normalize",
         "scan.correlate",
         "scan.ai",
@@ -221,6 +223,7 @@ const day2Workers = startDay2Workers({ prisma, redisUrl, workerId });
 const day3Workers = startDay3Workers({ prisma, redisUrl, workerId });
 const day4Workers = startDay4Workers({ prisma, redisUrl, workerId });
 const day5Workers = startDay5Workers({ prisma, redisUrl, workerId });
+const authorizationWorkers = startAuthorizationWorkers({ prisma, redisUrl, workerId });
 
 const worker = new Worker<OrchestrationPayload>(orchestrationQueueName, processOrchestration, {
   connection,
@@ -301,6 +304,7 @@ async function shutdown(signal: string): Promise<void> {
     day3Workers.close(),
     day4Workers.close(),
     day5Workers.close(),
+    authorizationWorkers.close(),
   ]);
   await orchestrationQueue.close();
   await discoveryQueue.close();

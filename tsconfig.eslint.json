@@ -9,7 +9,11 @@
     "baseUrl": ".",
     "paths": {
       "@aasp/schemas": ["packages/schemas/src/index.ts"],
+      "@aasp/database": ["packages/database/src/index.ts"],
+      "@aasp/logger": ["packages/logger/src/index.ts"],
       "@aasp/security-core": ["packages/security-core/src/index.ts"],
+      "@aasp/authorization-engine": ["services/authorization-engine/src/index.ts"],
+      "@aasp/evidence-engine": ["services/evidence-engine/src/index.ts"],
       "@aasp/scope-engine": ["services/scope-engine/src/index.ts"],
       "@aasp/crawler": ["services/crawler/src/index.ts"],
       "@aasp/api-discovery": ["services/api-discovery/src/index.ts"],
@@ -22,10 +26,13 @@
       "@aasp/scanner-misconfiguration": ["services/scanner-misconfiguration/src/index.ts"],
       "@aasp/scanner-tls": ["services/scanner-tls/src/index.ts"],
       "@aasp/scanner-cors": ["services/scanner-cors/src/index.ts"],
+      "@aasp/scanner-application": ["services/scanner-application/src/index.ts"],
       "@aasp/finding-engine": ["services/finding-engine/src/index.ts"],
       "@aasp/correlation-engine": ["services/correlation-engine/src/index.ts"],
       "@aasp/ai-engine": ["services/ai-engine/src/index.ts"],
-      "@aasp/report-engine": ["services/report-engine/src/index.ts"]
+      "@aasp/report-engine": ["services/report-engine/src/index.ts"],
+      "@aasp/longitudinal-engine": ["services/longitudinal-engine/src/index.ts"],
+      "@aasp/engagement-engine": ["services/engagement-engine/src/index.ts"]
     },
     "noEmit": true,
     "declaration": false

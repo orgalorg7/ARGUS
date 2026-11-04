@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@aasp/authorization-engine": "workspace:*",
     "@aasp/ai-engine": "workspace:*",
     "@aasp/database": "workspace:*",
     "@aasp/schemas": "workspace:*",
@@ -26,7 +27,8 @@
     "express": "5.2.1",
     "ioredis": "5.8.2",
     "reflect-metadata": "0.2.2",
-    "rxjs": "7.8.2"
+    "rxjs": "7.8.2",
+    "@aasp/engagement-engine": "workspace:*"
   },
   "devDependencies": {
     "@types/express": "5.0.6"

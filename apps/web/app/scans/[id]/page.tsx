@@ -30,6 +30,7 @@ export default async function ScanPage({
   const tabs = [
     ["Assets", "assets"],
     ["Endpoints", "endpoints"],
+    ["Authorization", "authorization"],
     ["Findings", "findings"],
     ["Report", "report"],
   ];

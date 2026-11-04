@@ -7,7 +7,7 @@ import {
 import { TargetStatus, type Prisma } from "@aasp/database";
 import { targetScopeSchema, type TargetScopeInput } from "@aasp/schemas";
 import { normalizeAssessmentUrl, scopePolicyFromTarget } from "@aasp/scope-engine";
-import { AuditService } from "../audit/audit.service.js";
+import { requirePermission, audit, atomic } from "@aasp/engagement-engine";
 import { PrismaService } from "../database/prisma.service.js";
 
 interface NormalizedTargetScope {
@@ -82,18 +82,15 @@ function normalizeScope(origin: URL, input: TargetScopeInput): NormalizedTargetS
 }
 
 function scopeRuleData(
-  workspaceId: string,
   scope: NormalizedTargetScope,
 ): Prisma.ScopeRuleUncheckedCreateWithoutTargetInput[] {
   return [
-    ...scope.allowedDomains.map((value) => ({ workspaceId, type: "HOST" as const, value })),
+    ...scope.allowedDomains.map((value) => ({ type: "HOST" as const, value })),
     ...scope.allowedPorts.map((value) => ({
-      workspaceId,
       type: "PORT" as const,
       value: String(value),
     })),
     ...scope.excludedPaths.map((value) => ({
-      workspaceId,
       type: "PATH_EXCLUDE" as const,
       value,
     })),
@@ -102,10 +99,7 @@ function scopeRuleData(
 
 @Injectable()
 export class TargetsService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   list(workspaceId: string) {
     return this.prisma.target.findMany({
@@ -125,43 +119,51 @@ export class TargetsService {
     actorId: string,
     input: { name: string; url: string; scope?: TargetScopeInput },
   ) {
+    await requirePermission(this.prisma, { workspaceId, userId: actorId }, "scope.modify");
     const origin = normalizeAssessmentUrl(input.url);
     const normalizedHostname = origin.hostname.replace(/^\[|\]$/gu, "");
     const scope = input.scope ? normalizeScope(origin, input.scope) : null;
-    const target = await this.prisma.target.create({
-      data: {
-        workspaceId,
-        createdById: actorId,
-        name: input.name.trim(),
-        origin: origin.origin,
-        normalizedHostname,
-        normalizedPort: origin.port ? Number(origin.port) : null,
-        status: scope ? TargetStatus.READY : TargetStatus.DRAFT,
-        includeSubdomains: scope?.includeSubdomains ?? false,
-        allowPrivateNetwork: scope?.allowPrivateNetwork ?? false,
-        ...(scope ? { scopeRules: { create: scopeRuleData(workspaceId, scope) } } : {}),
-      },
-      include: {
-        scopeRules: {
-          where: { enabled: true },
-          orderBy: [{ type: "asc" }, { value: "asc" }],
+    return atomic(this.prisma, async (tx) => {
+      await requirePermission(tx, { workspaceId, userId: actorId }, "scope.modify");
+      const target = await tx.target.create({
+        data: {
+          workspaceId,
+          createdById: actorId,
+          name: input.name.trim(),
+          origin: origin.origin,
+          normalizedHostname,
+          normalizedPort: origin.port ? Number(origin.port) : null,
+          status: scope ? TargetStatus.READY : TargetStatus.DRAFT,
+          includeSubdomains: scope?.includeSubdomains ?? false,
+          allowPrivateNetwork: scope?.allowPrivateNetwork ?? false,
+          ...(scope ? { scopeRules: { create: scopeRuleData(scope) } } : {}),
         },
-      },
+        include: {
+          scopeRules: {
+            where: { enabled: true },
+            orderBy: [{ type: "asc" }, { value: "asc" }],
+          },
+        },
+      });
+      await audit(
+        tx,
+        { workspaceId, userId: actorId },
+        scope ? "target.scope_configured" : "target.created",
+        "Target",
+        target.id,
+        {
+          origin: target.origin,
+          status: target.status,
+          revision: target.scopeRevision,
+          allowedDomains: scope?.allowedDomains ?? [],
+          allowedPorts: scope?.allowedPorts ?? [],
+          excludedPaths: scope?.excludedPaths ?? [],
+          includeSubdomains: scope?.includeSubdomains ?? false,
+          allowPrivateNetwork: scope?.allowPrivateNetwork ?? false,
+        },
+      );
+      return target;
     });
-    await this.audit.record({
-      workspaceId,
-      actorId,
-      action: scope ? "target.scope_configured" : "target.created",
-      resourceType: "Target",
-      resourceId: target.id,
-      metadata: {
-        origin: target.origin,
-        status: target.status,
-        allowedDomains: scope?.allowedDomains ?? [],
-        allowedPorts: scope?.allowedPorts ?? [],
-      },
-    });
-    return target;
   }
 
   async configureScope(
@@ -170,6 +172,7 @@ export class TargetsService {
     actorId: string,
     input: TargetScopeInput,
   ) {
+    await requirePermission(this.prisma, { workspaceId, userId: actorId }, "scope.modify");
     const target = await this.prisma.target.findFirst({ where: { id: targetId, workspaceId } });
     if (!target) throw new NotFoundException("Target does not exist in this workspace.");
     if (target.status === TargetStatus.SCANNING) {
@@ -179,15 +182,30 @@ export class TargetsService {
       throw new ConflictException("A disabled target cannot be reconfigured.");
     }
     const scope = normalizeScope(normalizeAssessmentUrl(target.origin), input);
-    const updated = await this.prisma.$transaction(async (transaction) => {
-      await transaction.scopeRule.deleteMany({ where: { workspaceId, targetId } });
-      return transaction.target.update({
-        where: { id: targetId },
+    const updated = await atomic(this.prisma, async (transaction) => {
+      await requirePermission(transaction, { workspaceId, userId: actorId }, "scope.modify");
+      const reserved = await transaction.target.updateMany({
+        where: {
+          id: targetId,
+          workspaceId,
+          scopeRevision: target.scopeRevision,
+          status: { notIn: ["SCANNING", "DISABLED"] },
+        },
+        data: { scopeRevision: { increment: 1 } },
+      });
+      if (reserved.count !== 1)
+        throw new ConflictException("Target state or scope changed. Reload before editing.");
+      await transaction.scopeRule.updateMany({
+        where: { workspaceId, targetId, enabled: true },
+        data: { enabled: false },
+      });
+      const result = await transaction.target.update({
+        where: { id: targetId, workspaceId },
         data: {
           status: TargetStatus.READY,
           includeSubdomains: scope.includeSubdomains,
           allowPrivateNetwork: scope.allowPrivateNetwork,
-          scopeRules: { create: scopeRuleData(workspaceId, scope) },
+          scopeRules: { create: scopeRuleData(scope) },
         },
         include: {
           scopeRules: {
@@ -196,22 +214,20 @@ export class TargetsService {
           },
         },
       });
+      await audit(
+        transaction,
+        { workspaceId, userId: actorId },
+        "target.scope_configured",
+        "Target",
+        targetId,
+        {
+          revision: result.scopeRevision,
+          ...scope,
+        },
+      );
+      return result;
     });
     scopePolicyFromTarget(updated);
-    await this.audit.record({
-      workspaceId,
-      actorId,
-      action: "target.scope_configured",
-      resourceType: "Target",
-      resourceId: targetId,
-      metadata: {
-        allowedDomains: scope.allowedDomains,
-        includeSubdomains: scope.includeSubdomains,
-        allowedPorts: scope.allowedPorts,
-        excludedPaths: scope.excludedPaths,
-        allowPrivateNetwork: scope.allowPrivateNetwork,
-      },
-    });
     return updated;
   }
 
@@ -221,17 +237,16 @@ export class TargetsService {
     if (target.status === TargetStatus.SCANNING) {
       throw new ConflictException("Cancel the running assessment before disabling its target.");
     }
-    const updated = await this.prisma.target.update({
-      where: { id: targetId },
-      data: { status: TargetStatus.DISABLED, disabledAt: new Date() },
+    return atomic(this.prisma, async (tx) => {
+      await requirePermission(tx, { workspaceId, userId: actorId }, "scope.modify");
+      const changed = await tx.target.updateMany({
+        where: { id: targetId, workspaceId, status: { not: "SCANNING" } },
+        data: { status: TargetStatus.DISABLED, disabledAt: new Date() },
+      });
+      if (changed.count !== 1)
+        throw new ConflictException("Target became busy. Cancel its execution first.");
+      await audit(tx, { workspaceId, userId: actorId }, "target.disabled", "Target", targetId);
+      return tx.target.findFirstOrThrow({ where: { id: targetId, workspaceId } });
     });
-    await this.audit.record({
-      workspaceId,
-      actorId,
-      action: "target.disabled",
-      resourceType: "Target",
-      resourceId: targetId,
-    });
-    return updated;
   }
 }

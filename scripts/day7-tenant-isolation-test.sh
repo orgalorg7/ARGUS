@@ -42,7 +42,7 @@ assert_status() {
 # The same authenticated owner belongs to both workspaces, so these checks
 # exercise resource scoping rather than merely failing the workspace guard.
 assert_status 404 PUT "$api_url/workspaces/$workspace_b/targets/$target_a/scope" '{"allowedDomains":["fixture.internal"],"includeSubdomains":false,"allowedPorts":[4010],"excludedPaths":[],"allowPrivateNetwork":true}'
-assert_status 404 POST "$api_url/workspaces/$workspace_b/scans" "{\"targetId\":\"$target_a\",\"name\":\"Cross-tenant target rejection\",\"profile\":\"LIGHT\"}"
+assert_status 404 POST "$api_url/workspaces/$workspace_b/scans" "{\"targetId\":\"$target_a\",\"engagementId\":\"out-of-tenant-engagement\",\"name\":\"Cross-tenant target rejection\",\"profile\":\"LIGHT\"}"
 
 for resource in "" assets urls endpoints technologies evidence findings reports; do
   suffix="${resource:+/$resource}"

@@ -5,6 +5,7 @@ import { correlateFindings } from "@aasp/correlation-engine";
 import { normalizeObservations, type FindingObservationRecord } from "@aasp/finding-engine";
 import {
   generateCompleteScanReport,
+  generateExecutiveReport,
   generateVulnerabilityReport,
   type ReportFinding,
   type ScanReportInput,
@@ -129,6 +130,14 @@ const findings: ReportFinding[] = correlated.map((finding, index) => ({
       scannerSources: finding.scannerSources,
       remediation: analysis?.remediation ?? finding.remediation,
       manualVerificationRequired,
+      trendStatus: "NEW" as const,
+      remediationPriority:
+        finding.severity === "CRITICAL" || finding.severity === "HIGH"
+          ? ("FIX_NOW" as const)
+          : finding.severity === "MEDIUM"
+            ? ("FIX_NEXT" as const)
+            : ("HARDENING" as const),
+      recurrenceCount: 1,
       likelyFalsePositive: analysis?.likelyFalsePositive ?? null,
       reasoningSummary: analysis?.reasoningSummary ?? null,
       firstSeen: finding.firstSeen.toISOString(),
@@ -218,6 +227,31 @@ const input: ScanReportInput = {
   endpoints,
   technologies: [],
   findings,
+  comparison: {
+    previousScanId: null,
+    coverageSufficient: false,
+    coverageRatio: 0,
+    coverageReasons: ["No previous completed local assessment is available."],
+    counts: {
+      NEW: findings.length,
+      RECURRING: 0,
+      RESOLVED: 0,
+      REGRESSED: 0,
+      CHANGED: 0,
+      UNVERIFIED: 0,
+    },
+    newAssets: [`ORIGIN|${decoded.target}`],
+    removedAssets: [],
+    technologyChanges: { added: [], removed: [] },
+    resolvedFindings: [],
+    unverifiedFindings: [],
+  },
+  qwenAnalysis: {
+    status: aiPath ? "COMPLETED" : "NOT_CONFIGURED",
+    totalFindings: findings.length,
+    validatedAnalyses: aiPath ? findings.length : 0,
+    failedOrWaitingAnalyses: 0,
+  },
   scannerSources: [...new Set(observations.map(({ scanner }) => scanner))].sort(),
   requestsPerformed: decoded.crawl.requestsMade + decoded.safeActive.requestsMade,
   failedOrDegradedStages: aiPath
@@ -234,12 +268,19 @@ const input: ScanReportInput = {
 const directory = resolve(reportsRoot, input.scan.id);
 await mkdir(resolve(directory, "findings"), { recursive: true });
 const report = generateCompleteScanReport(input);
+const executive = generateExecutiveReport(input);
 await Promise.all([
   writeFile(resolve(directory, "scan-report.html"), report.html),
   writeFile(resolve(directory, "scan-report.pdf-ready.html"), report.pdfReadyHtml),
   writeFile(
     resolve(directory, "scan-report.json"),
     JSON.stringify(report.document, null, 2) + "\n",
+  ),
+  writeFile(resolve(directory, "executive-report.html"), executive.html),
+  writeFile(resolve(directory, "executive-report.pdf-ready.html"), executive.pdfReadyHtml),
+  writeFile(
+    resolve(directory, "executive-report.json"),
+    JSON.stringify(executive.document, null, 2) + "\n",
   ),
   ...findings.flatMap((finding) => {
     const item = generateVulnerabilityReport({

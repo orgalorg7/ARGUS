@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 const sensitiveHeaderPattern = /^(authorization|cookie|set-cookie|proxy-authorization|x-api-key)$/i;
 const secretFieldPattern =
-  /(authorization|cookie|password|passwd|secret|token|api[-_]?key|session|credential)/i;
+  /(authorization|cookie|password|passwd|secret|token|api[-_]?key|session|credential|email|phone|address|national[-_]?id|payment|billing|ssn|credit[-_]?card)/i;
 const nonSecretPolicyFieldPattern =
   /^(access-control-allow-credentials|accessControlAllowCredentials|allowCredentials)$/i;
 const bearerPattern = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi;
@@ -36,12 +36,42 @@ export function redactHeaders(
 
 export function redactText(input: string): string {
   return sanitizeTextForPersistence(input)
+    .replace(
+      /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----/g,
+      "[REDACTED_PRIVATE_KEY]",
+    )
+    .replace(
+      /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key)\s*:\s*(?!\[REDACTED\])[^\r\n]+/gim,
+      "$1: [REDACTED]",
+    )
     .replace(bearerPattern, "$1 [REDACTED]")
     .replace(jwtPattern, "[REDACTED_JWT]")
     .replace(
-      /(["']?(?:password|secret|token|api[-_]?key|session)["']?\s*[:=]\s*)["']?[^\s,"'&}]+/gi,
-      "$1[REDACTED]",
+      /(["']?(?:password|secret|token|api[-_]?key|session)["']?\s*[:=]\s*)["']?([^\s,"'&}]+)/gi,
+      (match: string, prefix: string, value: string) =>
+        value === "[REDACTED]" ? match : `${prefix}[REDACTED]`,
     );
+}
+
+/** Conservative export gate, not a claim that arbitrary secrets can be discovered by regex. */
+export function containsUnredactedSecret(value: unknown): boolean {
+  if (typeof value === "string") return redactText(value) !== sanitizeTextForPersistence(value);
+  if (Array.isArray(value)) return value.some(containsUnredactedSecret);
+  if (value && typeof value === "object")
+    return Object.entries(value).some(([key, item]) => {
+      const sensitive =
+        /^(?:password|passwd|secret|token|api[-_]?key|authorization|proxy-authorization|cookie|set-cookie|x-api-key|private[-_]?key)$/i.test(
+          key,
+        );
+      return (
+        (sensitive &&
+          typeof item === "string" &&
+          item.length > 0 &&
+          !/^\[REDACTED(?:_[A-Z_]+)?\]$/.test(item)) ||
+        containsUnredactedSecret(item)
+      );
+    });
+  return false;
 }
 
 export function redactUnknown(value: unknown): unknown {

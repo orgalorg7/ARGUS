@@ -24,7 +24,12 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException("Bearer token required.");
     let payload: JwtPayload;
     try {
-      payload = await this.jwt.verifyAsync<JwtPayload>(authorization.slice(7));
+      payload = await this.jwt.verifyAsync<JwtPayload>(authorization.slice(7), {
+        issuer: "aasp-api",
+        audience: "aasp-web",
+        algorithms: ["HS256"],
+      });
+      if (typeof payload.sub !== "string" || !payload.sub) throw new Error("Invalid subject");
     } catch {
       throw new UnauthorizedException("Bearer token is invalid or expired.");
     }

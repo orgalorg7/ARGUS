@@ -1,0 +1,24 @@
+name: argus-local-cpu
+
+# CPU-only local acceptance override. It deliberately uses an isolated Compose
+# project and private network so old Qwen/provider records from another stack
+# cannot affect deterministic backend/frontend testing.
+services:
+  api:
+    image: argus-local-cpu-platform:latest
+
+  worker:
+    image: argus-local-cpu-platform:latest
+
+  reports-init:
+    image: argus-local-cpu-platform:latest
+
+  fixture:
+    image: argus-local-cpu-platform:latest
+
+  web:
+    image: argus-local-cpu-platform:latest
+
+networks:
+  private:
+    name: argus-local-cpu-private

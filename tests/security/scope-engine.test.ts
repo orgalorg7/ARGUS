@@ -52,6 +52,10 @@ describe("scope engine security boundary", () => {
     ["::1", "LOOPBACK"],
     ["fc00::1", "PRIVATE"],
     ["::ffff:127.0.0.1", "LOOPBACK"],
+    ["::ffff:7f00:1", "LOOPBACK"],
+    ["0:0:0:0:0:ffff:0a00:0001", "PRIVATE"],
+    ["2001:0db8:0:0:0:0:0:1", "DOCUMENTATION"],
+    ["64:ff9b::7f00:1", "RESERVED"],
   ])("classifies %s as non-public %s", (address, expected) => {
     expect(classifyAddress(address)).toBe(expected);
   });
@@ -66,6 +70,21 @@ describe("scope engine security boundary", () => {
       }),
     ).rejects.toMatchObject({ reason: "ADDRESS_BLOCKED" });
   });
+
+  it.each(["/%61dmin", "/%2561dmin", "/allowed%2f..%2fadmin", "/allowed%252f..%252fadmin"])(
+    "blocks alternate encoding of an excluded path: %s",
+    async (path) => {
+      const engine = new ScopeEngine(new SequenceResolver([[publicAddress]]));
+      await expect(
+        engine.assertAllowed(`https://example.com${path}`, {
+          targetOrigin: "https://example.com",
+          includeSubdomains: false,
+          allowPrivateNetwork: false,
+          excludedPathPrefixes: ["/admin"],
+        }),
+      ).rejects.toMatchObject({ reason: "PATH_EXCLUDED" });
+    },
+  );
 
   it("allows a loopback fixture only when its approved policy explicitly permits it", async () => {
     const engine = new ScopeEngine(new SequenceResolver([[{ address: "127.0.0.1", family: 4 }]]));

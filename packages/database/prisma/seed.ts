@@ -3,10 +3,10 @@ import argon2 from "argon2";
 
 const prisma = new PrismaClient();
 
-const descriptions: Record<WorkspaceRole, string> = {
+const descriptions: Partial<Record<WorkspaceRole, string>> = {
   OWNER: "Full workspace control, including membership and destructive administration.",
   ADMIN: "Workspace administration, target scope governance, and assessment control.",
-  ANALYST: "Target registration, scope configuration, assessment execution, and finding review.",
+  ANALYST: "Authorized assessment execution, evidence access, and finding creation.",
   VIEWER: "Read-only access to authorized workspace assessment data.",
 };
 
@@ -14,8 +14,15 @@ async function seed(): Promise<void> {
   for (const role of Object.values(WorkspaceRole)) {
     await prisma.role.upsert({
       where: { name: role },
-      create: { name: role, description: descriptions[role] },
-      update: { description: descriptions[role] },
+      create: {
+        name: role,
+        description:
+          descriptions[role] ?? `Scoped ${role.toLowerCase().replaceAll("_", " ")} access.`,
+      },
+      update: {
+        description:
+          descriptions[role] ?? `Scoped ${role.toLowerCase().replaceAll("_", " ")} access.`,
+      },
     });
   }
 
@@ -40,7 +47,7 @@ async function seed(): Promise<void> {
       displayName: "System Administrator",
       isSystemAdmin: true,
     },
-    update: { passwordHash, isSystemAdmin: true, isActive: true },
+    update: {},
   });
   process.stdout.write(`System administrator seeded for ${email}.\n`);
 }

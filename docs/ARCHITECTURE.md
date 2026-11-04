@@ -2,6 +2,8 @@
 
 The platform is a pnpm TypeScript monorepo. Next.js provides the browser application, NestJS exposes authenticated workspace-scoped APIs, PostgreSQL stores authoritative state through Prisma, and BullMQ/Redis carries recoverable job notifications. PostgreSQL remains the source of truth for scan/job status; Redis is not treated as durable assessment evidence.
 
+The [engagement governance increment](FOUNDATION.md) adds Organization → Workspace → Client → Engagement → versioned ROE/targets → authorization documents/grants → governed scans. AI analysis remains advisory.
+
 ## Security and data flow
 
 ```text

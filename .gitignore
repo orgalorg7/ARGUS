@@ -25,3 +25,13 @@ __pycache__/
 artifacts/
 *.log
 *.tsbuildinfo
+
+# Authentication state must never be persisted in the repository.
+auth.json
+cookies.json
+storageState.json
+storage-state.json
+*.auth-state.json
+*.storage-state.json
+playwright/.auth/
+auth-artifacts/

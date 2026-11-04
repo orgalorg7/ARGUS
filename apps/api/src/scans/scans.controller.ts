@@ -22,6 +22,9 @@ import { ScansService } from "./scans.service.js";
 
 class CreateScanDto {
   @IsString()
+  @Length(1, 128)
+  engagementId!: string;
+  @IsString()
   targetId!: string;
 
   @IsString()
@@ -109,8 +112,12 @@ export class ScansController {
 
   @Get(":scanId/evidence")
   @WorkspaceRoles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.ANALYST)
-  evidence(@Param("workspaceId") workspaceId: string, @Param("scanId") scanId: string) {
-    return this.scans.evidence(workspaceId, scanId);
+  evidence(
+    @Param("workspaceId") workspaceId: string,
+    @Param("scanId") scanId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.scans.evidence(workspaceId, scanId, user.id);
   }
 
   @Get(":scanId/findings")
@@ -122,6 +129,17 @@ export class ScansController {
   )
   findings(@Param("workspaceId") workspaceId: string, @Param("scanId") scanId: string) {
     return this.scans.findings(workspaceId, scanId);
+  }
+
+  @Get(":scanId/assessment-summary")
+  @WorkspaceRoles(
+    WorkspaceRole.OWNER,
+    WorkspaceRole.ADMIN,
+    WorkspaceRole.ANALYST,
+    WorkspaceRole.VIEWER,
+  )
+  assessmentSummary(@Param("workspaceId") workspaceId: string, @Param("scanId") scanId: string) {
+    return this.scans.assessmentSummary(workspaceId, scanId);
   }
 
   @Get(":scanId/findings/:findingId")
@@ -156,13 +174,18 @@ export class ScansController {
     @Param("workspaceId") workspaceId: string,
     @Param("scanId") scanId: string,
     @Param("reportId") reportId: string,
+    @CurrentUser() user: AuthenticatedUser,
     @Query("format") format: "html" | "json" | "pdf-ready" | undefined,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const file = await this.scans.reportFile(workspaceId, scanId, reportId, format);
+    const file = await this.scans.reportFile(workspaceId, scanId, reportId, user.id, format);
     response.setHeader("Content-Type", file.contentType);
     response.setHeader("Content-Disposition", `inline; filename="${file.filename}"`);
     response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader(
+      "Content-Security-Policy",
+      "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'",
+    );
     return new StreamableFile(file.stream);
   }
 

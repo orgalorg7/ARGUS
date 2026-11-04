@@ -1,11 +1,11 @@
 # Engagement Authorization and Target Scope
 
-Authorization to assess a target is established through the organization's business and security engagement process before the target is entered into the platform. The platform does not attempt to prove domain ownership and does not use DNS TXT challenges, well-known files, email verification, or verification tokens.
+Authorization to assess a target must be recorded in the engagement workflow. A saved target scope alone cannot authorize execution. A privileged operator preserves the permission document, reviews its coverage, and records a grant for the current immutable ROE revision and testing window. See [FOUNDATION.md](FOUNDATION.md) for API workflow, key setup and migration behavior.
 
 ## Target lifecycle
 
 ```text
-CREATE TARGET -> CONFIGURE SCOPE -> READY -> START SCAN
+CREATE TARGET -> CONFIGURE SCOPE -> READY -> ENGAGEMENT AUTHORIZATION -> TESTING -> START SCAN
 ```
 
 A target without a valid scope remains `DRAFT`. Saving a valid scope moves it to `READY`. During execution it is `SCANNING`; terminal target states are `COMPLETED`, `FAILED`, or `CANCELLED`. `DISABLED` targets cannot be scanned.
@@ -20,7 +20,7 @@ The saved scope contains:
 
 ## Scan-start rule
 
-The API starts a scan only when the target exists in the caller's workspace, is enabled and not already scanning, has a valid persisted scope, and the caller has a role permitted to run assessments. Target reservation and scan queueing occur atomically so concurrent starts cannot scan the same target simultaneously.
+The API also requires a TESTING/RETEST engagement, a current unrevoked grant and matching scope/ROE revision. It starts a scan only when the target exists in the caller's workspace, is enabled and not already scanning, has a valid persisted scope, and the caller has a role permitted to run assessments. Target reservation and scan queueing occur atomically so concurrent starts cannot scan the same target simultaneously.
 
 ## Hard network boundary
 

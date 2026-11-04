@@ -12,6 +12,16 @@ enum WorkspaceRole {
   ADMIN
   ANALYST
   VIEWER
+  PLATFORM_ADMIN
+  ORG_OWNER
+  SECURITY_DIRECTOR
+  PENTEST_MANAGER
+  LEAD_PENTESTER
+  PENTESTER
+  JUNIOR_PENTESTER
+  REVIEWER
+  CLIENT_ADMIN
+  CLIENT_USER
 }
 
 enum TargetStatus {
@@ -50,6 +60,7 @@ enum ScanState {
   FINGERPRINTING
   PASSIVE_ANALYSIS
   SAFE_ACTIVE_ANALYSIS
+  AUTHORIZATION_ANALYSIS
   NORMALIZING
   CORRELATING
   AI_ANALYSIS
@@ -60,6 +71,56 @@ enum ScanState {
   COMPLETED_WITH_WARNINGS
   FAILED
   CANCELLED
+}
+
+enum IdentityAuthenticationType {
+  ANONYMOUS
+  USERNAME_PASSWORD
+  SESSION_COOKIE
+  BEARER_TOKEN
+  API_KEY
+  CUSTOM_HEADERS
+  OAUTH_OIDC
+  LOGIN_AUTOMATION
+}
+
+enum IdentityAuthenticationState {
+  AUTHENTICATED
+  AUTH_EXPIRED
+  AUTH_REFRESHING
+  AUTH_FAILED
+  LOGGED_OUT
+  UNKNOWN
+  UNAVAILABLE
+}
+
+enum ResourceProvenance {
+  OPERATOR_SUPPLIED
+  SCANNER_CREATED
+  APPROVED_SEED
+  IDENTITY_OBSERVED
+}
+
+enum ResourceRelationshipType {
+  OWNS
+  MEMBER_OF
+  ADMIN_OF
+  MANAGER_OF
+  BELONGS_TO_TENANT
+  SHARED_WITH
+}
+
+enum AuthorizationMutationRisk {
+  READ_ONLY
+  SAFE_IDEMPOTENT
+  DISPOSABLE_TEST_FIXTURE
+}
+
+enum AuthorizationCleanupStrategy {
+  NONE
+  DELETE_CREATED_RESOURCE
+  RESTORE_FIXTURE
+  CUSTOM
 }
 
 enum StageStatus {
@@ -97,6 +158,22 @@ enum FindingStatus {
   MANUAL_VERIFICATION_REQUIRED
 }
 
+enum FindingTrendStatus {
+  NEW
+  RECURRING
+  RESOLVED
+  REGRESSED
+  CHANGED
+  UNVERIFIED
+}
+
+enum RemediationPriority {
+  FIX_NOW
+  FIX_NEXT
+  PLANNED
+  HARDENING
+}
+
 enum AIAnalysisStatus {
   PENDING
   RUNNING
@@ -106,6 +183,8 @@ enum AIAnalysisStatus {
 }
 
 enum ReportType {
+  EXECUTIVE
+  EXECUTIVE_PDF_READY
   COMPLETE_SCAN
   COMPLETE_SCAN_PDF_READY
   VULNERABILITY
@@ -131,18 +210,26 @@ enum ModelProviderStatus {
 }
 
 model User {
-  id             String            @id @default(cuid())
-  email          String            @unique
-  passwordHash   String
-  displayName    String
-  isSystemAdmin  Boolean           @default(false)
-  isActive       Boolean           @default(true)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  memberships    WorkspaceMember[]
-  createdTargets Target[]          @relation("TargetCreatedBy")
-  createdScans   Scan[]            @relation("ScanCreatedBy")
-  auditEvents    AuditEvent[]
+  authoredPolicies        EngagementPolicy[]
+  uploadedAuthorizations  AuthorizationDocument[]
+  approvedGrants          AuthorizationGrant[]
+  revokedGrants           AuthorizationRevocation[]
+  engagementTransitions   EngagementTransition[]
+  executionDecisions      ExecutionDecision[]
+  executionScans          Scan[]                    @relation("ExecutionActor")
+  id                      String                    @id @default(cuid())
+  email                   String                    @unique
+  passwordHash            String
+  displayName             String
+  isSystemAdmin           Boolean                   @default(false)
+  isActive                Boolean                   @default(true)
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  organizationMemberships OrganizationMember[]
+  memberships             WorkspaceMember[]
+  createdTargets          Target[]                  @relation("TargetCreatedBy")
+  createdScans            Scan[]                    @relation("ScanCreatedBy")
+  auditEvents             AuditEvent[]
 }
 
 model Role {
@@ -154,27 +241,38 @@ model Role {
 }
 
 model Workspace {
-  id             String                @id @default(cuid())
-  name           String
-  slug           String                @unique
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-  members        WorkspaceMember[]
-  targets        Target[]
-  scans          Scan[]
-  scopeRules     ScopeRule[]
-  assets         DiscoveredAsset[]
-  urls           DiscoveredURL[]
-  endpoints      DiscoveredEndpoint[]
-  parameters     DiscoveredParameter[]
-  technologies   Technology[]
-  observations   ScannerObservation[]
-  evidence       Evidence[]
-  findings       Finding[]
-  aiAnalyses     AIAnalysis[]
-  reports        Report[]
-  auditEvents    AuditEvent[]
-  modelProviders ModelProvider[]
+  organizationId           String
+  organization             Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  clients                  Client[]
+  engagements              Engagement[]
+  id                       String                    @id @default(cuid())
+  name                     String
+  slug                     String                    @unique
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  members                  WorkspaceMember[]
+  targets                  Target[]
+  scans                    Scan[]
+  scopeRules               ScopeRule[]
+  assets                   DiscoveredAsset[]
+  urls                     DiscoveredURL[]
+  endpoints                DiscoveredEndpoint[]
+  parameters               DiscoveredParameter[]
+  technologies             Technology[]
+  observations             ScannerObservation[]
+  evidence                 Evidence[]
+  findings                 Finding[]
+  aiAnalyses               AIAnalysis[]
+  reports                  Report[]
+  scanComparisons          ScanComparison[]
+  auditEvents              AuditEvent[]
+  modelProviders           ModelProvider[]
+  assessmentIdentities     AssessmentIdentity[]
+  authorizedResources      AuthorizedResource[]
+  authorizationTestCases   AuthorizationTestCase[]
+  authorizationTestResults AuthorizationTestResult[]
+
+  @@index([organizationId])
 }
 
 model WorkspaceMember {
@@ -192,24 +290,30 @@ model WorkspaceMember {
 }
 
 model Target {
-  id                  String       @id @default(cuid())
-  workspaceId         String
-  name                String
-  origin              String
-  normalizedHostname  String
-  normalizedPort      Int?
-  status              TargetStatus @default(DRAFT)
-  includeSubdomains   Boolean      @default(false)
-  allowPrivateNetwork Boolean      @default(false)
-  createdById         String
-  disabledAt          DateTime?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
-  workspace           Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy           User         @relation("TargetCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  scopeRules          ScopeRule[]
-  scans               Scan[]
+  scopeRevision          Int                     @default(1)
+  engagementTargets      EngagementTarget[]
+  id                     String                  @id @default(cuid())
+  workspaceId            String
+  name                   String
+  origin                 String
+  normalizedHostname     String
+  normalizedPort         Int?
+  status                 TargetStatus            @default(DRAFT)
+  includeSubdomains      Boolean                 @default(false)
+  allowPrivateNetwork    Boolean                 @default(false)
+  createdById            String
+  disabledAt             DateTime?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  workspace              Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy              User                    @relation("TargetCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  scopeRules             ScopeRule[]
+  scans                  Scan[]
+  assessmentIdentities   AssessmentIdentity[]
+  authorizedResources    AuthorizedResource[]
+  authorizationTestCases AuthorizationTestCase[]
 
+  @@unique([workspaceId, id])
   @@unique([workspaceId, origin])
   @@index([workspaceId, status])
 }
@@ -223,45 +327,180 @@ model ScopeRule {
   enabled     Boolean       @default(true)
   createdAt   DateTime      @default(now())
   workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  target      Target        @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  target      Target        @relation(fields: [workspaceId, targetId], references: [workspaceId, id], onDelete: Cascade)
 
   @@index([workspaceId, targetId, enabled])
 }
 
 model Scan {
-  id                String                @id @default(cuid())
-  workspaceId       String
-  targetId          String
-  name              String
-  state             ScanState             @default(CREATED)
-  warningCount      Int                   @default(0)
-  failureReason     String?
-  cancelRequestedAt DateTime?
-  createdById       String
-  queuedAt          DateTime?
-  startedAt         DateTime?
-  completedAt       DateTime?
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
-  workspace         Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  target            Target                @relation(fields: [targetId], references: [id], onDelete: Restrict)
-  createdBy         User                  @relation("ScanCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  config            ScanConfig?
-  stages            ScanStage[]
-  jobs              ScanJob[]
-  assets            DiscoveredAsset[]
-  urls              DiscoveredURL[]
-  endpoints         DiscoveredEndpoint[]
-  parameters        DiscoveredParameter[]
-  technologies      Technology[]
-  observations      ScannerObservation[]
-  evidence          Evidence[]
-  findings          Finding[]
-  aiAnalyses        AIAnalysis[]
-  reports           Report[]
+  executionActor           User?                     @relation("ExecutionActor", fields: [executionActorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  executionDecisions       ExecutionDecision[]
+  engagementId             String?
+  authorizationGrantId     String?
+  executionActorId         String?
+  engagement               Engagement?               @relation(fields: [workspaceId, engagementId], references: [workspaceId, id], onDelete: Restrict)
+  authorizationGrant       AuthorizationGrant?       @relation(fields: [workspaceId, engagementId, authorizationGrantId], references: [workspaceId, engagementId, id], onDelete: Restrict)
+  id                       String                    @id @default(cuid())
+  workspaceId              String
+  targetId                 String
+  name                     String
+  state                    ScanState                 @default(CREATED)
+  warningCount             Int                       @default(0)
+  failureReason            String?
+  cancelRequestedAt        DateTime?
+  createdById              String
+  queuedAt                 DateTime?
+  startedAt                DateTime?
+  completedAt              DateTime?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  workspace                Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  target                   Target                    @relation(fields: [workspaceId, targetId], references: [workspaceId, id], onDelete: Restrict)
+  createdBy                User                      @relation("ScanCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  config                   ScanConfig?
+  stages                   ScanStage[]
+  jobs                     ScanJob[]
+  assets                   DiscoveredAsset[]
+  urls                     DiscoveredURL[]
+  endpoints                DiscoveredEndpoint[]
+  parameters               DiscoveredParameter[]
+  technologies             Technology[]
+  observations             ScannerObservation[]
+  evidence                 Evidence[]
+  findings                 Finding[]
+  aiAnalyses               AIAnalysis[]
+  reports                  Report[]
+  currentComparison        ScanComparison?           @relation("CurrentScanComparison")
+  baselineForComparisons   ScanComparison[]          @relation("PreviousScanComparison")
+  authorizationTestResults AuthorizationTestResult[]
 
+  @@unique([workspaceId, id])
+  @@index([workspaceId, engagementId, createdAt])
   @@index([workspaceId, state])
   @@index([targetId, createdAt])
+}
+
+model AssessmentIdentity {
+  id                    String                         @id @default(cuid())
+  workspaceId           String
+  targetId              String
+  label                 String
+  role                  String
+  tenant                String?
+  authenticationType    IdentityAuthenticationType
+  authenticationState   IdentityAuthenticationState    @default(UNKNOWN)
+  encryptedCredential   Json?
+  credentialFingerprint String?
+  metadata              Json?
+  enabled               Boolean                        @default(true)
+  lastAuthenticatedAt   DateTime?
+  lastFailureReason     String?
+  createdAt             DateTime                       @default(now())
+  updatedAt             DateTime                       @updatedAt
+  workspace             Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  target                Target                         @relation(fields: [workspaceId, targetId], references: [workspaceId, id], onDelete: Cascade)
+  ownedResources        AuthorizedResource[]           @relation("ResourceOwner")
+  resourceRelationships ResourceIdentityRelationship[]
+
+  @@unique([targetId, label])
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, targetId, id])
+  @@index([workspaceId, targetId, enabled])
+  @@index([workspaceId, tenant, role])
+}
+
+model AuthorizedResource {
+  id                String                         @id @default(cuid())
+  workspaceId       String
+  targetId          String
+  resourceType      String
+  externalId        String
+  tenant            String?
+  ownerIdentityId   String?
+  provenance        ResourceProvenance
+  endpointVariables Json?
+  metadata          Json?
+  enabled           Boolean                        @default(true)
+  createdAt         DateTime                       @default(now())
+  updatedAt         DateTime                       @updatedAt
+  workspace         Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  target            Target                         @relation(fields: [workspaceId, targetId], references: [workspaceId, id], onDelete: Cascade)
+  ownerIdentity     AssessmentIdentity?            @relation("ResourceOwner", fields: [workspaceId, targetId, ownerIdentityId], references: [workspaceId, targetId, id], onDelete: Restrict)
+  relationships     ResourceIdentityRelationship[]
+  testCases         AuthorizationTestCase[]
+
+  @@unique([targetId, resourceType, externalId])
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, targetId, id])
+  @@index([workspaceId, targetId, enabled])
+  @@index([ownerIdentityId])
+}
+
+model ResourceIdentityRelationship {
+  id           String                   @id @default(cuid())
+  resourceId   String
+  identityId   String
+  relationship ResourceRelationshipType
+  createdAt    DateTime                 @default(now())
+  resource     AuthorizedResource       @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  identity     AssessmentIdentity       @relation(fields: [identityId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceId, identityId, relationship], map: "ResourceIdentityRelationship_resourceId_identityId_relationship")
+  @@index([identityId, relationship])
+}
+
+model AuthorizationTestCase {
+  id                           String                       @id @default(cuid())
+  workspaceId                  String
+  targetId                     String
+  resourceId                   String
+  name                         String
+  action                       String
+  endpointTemplate             String
+  method                       String
+  identityIds                  String[]
+  expectedPolicy               Json
+  mutationRisk                 AuthorizationMutationRisk    @default(READ_ONLY)
+  mutationExplicitlyAuthorized Boolean                      @default(false)
+  cleanupStrategy              AuthorizationCleanupStrategy @default(NONE)
+  requestHeaders               Json?
+  encryptedRequestBody         Json?
+  contentType                  String?
+  followRedirects              Boolean                      @default(false)
+  timingSamples                Int                          @default(1)
+  enabled                      Boolean                      @default(true)
+  createdAt                    DateTime                     @default(now())
+  updatedAt                    DateTime                     @updatedAt
+  workspace                    Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  target                       Target                       @relation(fields: [workspaceId, targetId], references: [workspaceId, id], onDelete: Cascade)
+  resource                     AuthorizedResource           @relation(fields: [workspaceId, targetId, resourceId], references: [workspaceId, targetId, id], onDelete: Cascade)
+  results                      AuthorizationTestResult[]
+
+  @@unique([targetId, name])
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, targetId, id])
+  @@index([workspaceId, targetId, enabled])
+  @@index([resourceId])
+}
+
+model AuthorizationTestResult {
+  id                    String                @id @default(cuid())
+  workspaceId           String
+  scanId                String
+  testCaseId            String
+  correlationId         String
+  matrix                Json
+  findingFingerprints   String[]
+  incompleteIdentityIds String[]
+  degraded              Boolean               @default(false)
+  createdAt             DateTime              @default(now())
+  workspace             Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scan                  Scan                  @relation(fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Cascade)
+  testCase              AuthorizationTestCase @relation(fields: [workspaceId, testCaseId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([scanId, testCaseId])
+  @@index([workspaceId, scanId])
+  @@index([correlationId])
 }
 
 model ScanConfig {
@@ -294,7 +533,7 @@ model ScanStage {
   metadata       Json?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
-  scan           Scan        @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scan           Scan        @relation(fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Cascade)
 
   @@unique([scanId, name])
   @@index([workspaceId, scanId])
@@ -318,7 +557,7 @@ model ScanJob {
   completedAt    DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
-  scan           Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scan           Scan      @relation(fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Cascade)
 
   @@index([workspaceId, scanId, status])
 }
@@ -333,7 +572,7 @@ model DiscoveredAsset {
   lastSeenAt  DateTime  @default(now())
   metadata    Json?
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  scan        Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scan        Scan      @relation(fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Cascade)
 
   @@unique([scanId, assetType, value])
   @@index([workspaceId, scanId])
@@ -352,7 +591,7 @@ model DiscoveredURL {
   scannedAt    DateTime?
   createdAt    DateTime  @default(now())
   workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  scan         Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scan         Scan      @relation(fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Cascade)
 
   @@unique([scanId, canonicalUrl])
   @@index([workspaceId, scanId])
@@ -368,10 +607,12 @@ model DiscoveredEndpoint {
   source      String
   createdAt   DateTime              @default(now())
   workspace   Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  scan        Scan                  @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scan        Scan                  @relation(fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Cascade)
   parameters  DiscoveredParameter[]
 
   @@unique([scanId, asset, path, method])
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, scanId, id])
   @@index([workspaceId, scanId])
 }
 
@@ -385,8 +626,8 @@ model DiscoveredParameter {
   observedType String?
   createdAt    DateTime           @default(now())
   workspace    Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  scan         Scan               @relation(fields: [scanId], references: [id], onDelete: Cascade)
-  endpoint     DiscoveredEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  scan         Scan               @relation(fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Cascade)
+  endpoint     DiscoveredEndpoint @relation(fields: [workspaceId, scanId, endpointId], references: [workspaceId, scanId, id], onDelete: Cascade)
 
   @@unique([endpointId, name, location])
   @@index([workspaceId, scanId])
@@ -402,7 +643,7 @@ model Technology {
   evidenceIds     String[]
   createdAt       DateTime  @default(now())
   workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  scan            Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scan            Scan      @relation(fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Cascade)
 
   @@unique([scanId, technology, possibleVersion])
   @@index([workspaceId, scanId])
@@ -424,10 +665,12 @@ model ScannerObservation {
   signature       String
   createdAt       DateTime            @default(now())
   workspace       Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  scan            Scan                @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scan            Scan                @relation(fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Cascade)
   evidence        Evidence[]
   occurrences     FindingOccurrence[]
 
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, scanId, id])
   @@index([workspaceId, scanId, observationType])
   @@index([scanId, signature])
 }
@@ -446,10 +689,12 @@ model Evidence {
   hash             String
   createdAt        DateTime            @default(now())
   workspace        Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  scan             Scan                @relation(fields: [scanId], references: [id], onDelete: Cascade)
-  observation      ScannerObservation? @relation(fields: [observationId], references: [id], onDelete: SetNull)
+  scan             Scan                @relation(fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Cascade)
+  observation      ScannerObservation? @relation(fields: [workspaceId, scanId, observationId], references: [workspaceId, scanId, id], onDelete: Restrict)
   findingLinks     FindingEvidence[]
 
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, scanId, id])
   @@index([workspaceId, scanId])
   @@index([scanId, hash])
 }
@@ -476,20 +721,32 @@ model Finding {
   scannerSources             String[]
   remediation                String
   manualVerificationRequired Boolean             @default(false)
+  trendStatus                FindingTrendStatus  @default(NEW)
+  remediationPriority        RemediationPriority @default(HARDENING)
+  recurrenceCount            Int                 @default(1)
+  previousFindingId          String?
   correlationKey             String
   firstSeen                  DateTime            @default(now())
   lastSeen                   DateTime            @default(now())
   workspace                  Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  scan                       Scan                @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scan                       Scan                @relation(fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Cascade)
   evidenceLinks              FindingEvidence[]
   occurrences                FindingOccurrence[]
   history                    FindingHistory[]
   aiAnalyses                 AIAnalysis[]
   reports                    Report[]
+  previousFinding            Finding?            @relation("FindingLineage", fields: [workspaceId, previousFindingId], references: [workspaceId, id], onDelete: Restrict)
+  nextFindings               Finding[]           @relation("FindingLineage")
+  currentComparisons         FindingComparison[] @relation("CurrentFindingComparison")
+  previousComparisons        FindingComparison[] @relation("PreviousFindingComparison")
 
   @@unique([scanId, publicId])
   @@unique([scanId, correlationKey])
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, scanId, id])
   @@index([workspaceId, scanId, severity])
+  @@index([workspaceId, scanId, trendStatus])
+  @@index([previousFindingId])
 }
 
 model FindingEvidence {
@@ -526,6 +783,46 @@ model FindingHistory {
   @@index([findingId, createdAt])
 }
 
+model ScanComparison {
+  id                 String              @id @default(cuid())
+  workspaceId        String
+  scanId             String              @unique
+  previousScanId     String?
+  coverageSufficient Boolean
+  coverageRatio      Float
+  summary            Json
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  workspace          Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scan               Scan                @relation("CurrentScanComparison", fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Cascade)
+  previousScan       Scan?               @relation("PreviousScanComparison", fields: [workspaceId, previousScanId], references: [workspaceId, id], onDelete: Restrict)
+  findings           FindingComparison[]
+
+  @@unique([workspaceId, scanId])
+  @@index([workspaceId, createdAt])
+  @@index([previousScanId])
+}
+
+model FindingComparison {
+  id                String             @id @default(cuid())
+  scanComparisonId  String
+  currentFindingId  String?
+  previousFindingId String?
+  correlationKey    String
+  trendStatus       FindingTrendStatus
+  severityBefore    Severity?
+  severityAfter     Severity?
+  reason            String
+  createdAt         DateTime           @default(now())
+  scanComparison    ScanComparison     @relation(fields: [scanComparisonId], references: [id], onDelete: Cascade)
+  currentFinding    Finding?           @relation("CurrentFindingComparison", fields: [currentFindingId], references: [id], onDelete: SetNull)
+  previousFinding   Finding?           @relation("PreviousFindingComparison", fields: [previousFindingId], references: [id], onDelete: SetNull)
+
+  @@unique([scanComparisonId, correlationKey])
+  @@index([currentFindingId])
+  @@index([previousFindingId])
+}
+
 model AIAnalysis {
   id            String           @id @default(cuid())
   workspaceId   String
@@ -545,14 +842,15 @@ model AIAnalysis {
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
   workspace     Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  scan          Scan             @relation(fields: [scanId], references: [id], onDelete: Cascade)
-  finding       Finding?         @relation(fields: [findingId], references: [id], onDelete: SetNull)
+  scan          Scan             @relation(fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Cascade)
+  finding       Finding?         @relation(fields: [workspaceId, scanId, findingId], references: [workspaceId, scanId, id], onDelete: Restrict)
   provider      ModelProvider?   @relation(fields: [providerId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId, scanId, status])
 }
 
 model Report {
+  jsonSha256   String?
   id           String       @id @default(cuid())
   workspaceId  String
   scanId       String
@@ -565,8 +863,8 @@ model Report {
   generatedAt  DateTime?
   createdAt    DateTime     @default(now())
   workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  scan         Scan         @relation(fields: [scanId], references: [id], onDelete: Cascade)
-  finding      Finding?     @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  scan         Scan         @relation(fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Cascade)
+  finding      Finding?     @relation(fields: [workspaceId, scanId, findingId], references: [workspaceId, scanId, id], onDelete: Restrict)
 
   @@index([workspaceId, scanId, type])
 }
@@ -630,4 +928,241 @@ model ModelProvider {
 
   @@unique([workspaceId, name])
   @@index([workspaceId, status])
+}
+
+enum EngagementState {
+  DRAFT
+  SCOPING
+  AWAITING_AUTHORIZATION
+  AUTHORIZED
+  SCHEDULED
+  ACTIVE
+  TESTING
+  INTERNAL_REVIEW
+  CLIENT_REVIEW
+  REMEDIATION
+  RETEST
+  COMPLETED
+  ARCHIVED
+}
+
+enum ActionRisk {
+  PASSIVE
+  SAFE
+  LOW_IMPACT
+  MODERATE_IMPACT
+  HIGH_IMPACT
+  RESTRICTED
+}
+
+enum TestCategory {
+  DISCOVERY
+  HTTP_CONFIGURATION
+  AUTHORIZATION
+}
+
+enum AssetEnvironment {
+  PRODUCTION
+  STAGING
+  DEVELOPMENT
+  LAB
+}
+
+model Organization {
+  id         String               @id @default(cuid())
+  name       String
+  createdAt  DateTime             @default(now())
+  workspaces Workspace[]
+  members    OrganizationMember[]
+}
+
+model OrganizationMember {
+  organizationId String
+  userId         String
+  role           WorkspaceRole
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user           User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@id([organizationId, userId])
+  @@index([userId])
+}
+
+model Client {
+  id          String       @id @default(cuid())
+  workspaceId String
+  name        String
+  legalName   String
+  createdAt   DateTime     @default(now())
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  engagements Engagement[]
+
+  @@unique([workspaceId, id])
+  @@index([workspaceId, createdAt, id])
+}
+
+model Engagement {
+  id             String                  @id @default(cuid())
+  workspaceId    String
+  clientId       String
+  name           String
+  objective      String
+  environment    AssetEnvironment
+  state          EngagementState         @default(DRAFT)
+  version        Int                     @default(1)
+  policyRevision Int                     @default(0)
+  requestsMade   Int                     @default(0)
+  nextRequestAt  DateTime?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  workspace      Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  client         Client                  @relation(fields: [workspaceId, clientId], references: [workspaceId, id], onDelete: Restrict)
+  policies       EngagementPolicy[]
+  documents      AuthorizationDocument[]
+  grants         AuthorizationGrant[]
+  transitions    EngagementTransition[]
+  decisions      ExecutionDecision[]
+  scans          Scan[]
+
+  @@unique([workspaceId, id])
+  @@index([workspaceId, state, createdAt, id])
+  @@index([workspaceId, clientId])
+}
+
+model EngagementPolicy {
+  createdBy         User                 @relation(fields: [createdById], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id                String               @id @default(cuid())
+  workspaceId       String
+  engagementId      String
+  revision          Int
+  windowStartsAt    DateTime
+  windowEndsAt      DateTime
+  maxRequests       Int
+  requestsPerSecond Float
+  maxConcurrency    Int
+  maxRisk           ActionRisk
+  allowedCategories TestCategory[]
+  allowedProtocols  String[]
+  restrictions      String
+  createdById       String
+  reason            String
+  createdAt         DateTime             @default(now())
+  engagement        Engagement           @relation(fields: [workspaceId, engagementId], references: [workspaceId, id], onDelete: Restrict)
+  targets           EngagementTarget[]
+  grants            AuthorizationGrant[]
+
+  @@unique([workspaceId, engagementId, revision])
+}
+
+model EngagementTarget {
+  id             String           @id @default(cuid())
+  workspaceId    String
+  engagementId   String
+  policyRevision Int
+  targetId       String
+  scopeRevision  Int
+  scopeDigest    String
+  policy         EngagementPolicy @relation(fields: [workspaceId, engagementId, policyRevision], references: [workspaceId, engagementId, revision], onDelete: Restrict)
+  target         Target           @relation(fields: [workspaceId, targetId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, engagementId, policyRevision, targetId])
+  @@index([workspaceId, targetId])
+}
+
+model AuthorizationDocument {
+  uploadedBy       User                 @relation(fields: [uploadedById], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id               String               @id @default(cuid())
+  workspaceId      String
+  engagementId     String
+  filename         String
+  contentType      String
+  byteLength       Int
+  sha256           String
+  encryptedContent Bytes
+  uploadedById     String
+  createdAt        DateTime             @default(now())
+  engagement       Engagement           @relation(fields: [workspaceId, engagementId], references: [workspaceId, id], onDelete: Restrict)
+  grants           AuthorizationGrant[]
+
+  @@unique([workspaceId, engagementId, id])
+  @@index([workspaceId, engagementId, createdAt])
+}
+
+model AuthorizationGrant {
+  transitions    EngagementTransition[]
+  decisions      ExecutionDecision[]
+  approvedBy     User                     @relation(fields: [approvedById], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id             String                   @id @default(cuid())
+  workspaceId    String
+  engagementId   String
+  policyRevision Int
+  documentId     String
+  authorizedBy   String
+  approvedById   String
+  validFrom      DateTime
+  validUntil     DateTime
+  reason         String
+  createdAt      DateTime                 @default(now())
+  engagement     Engagement               @relation(fields: [workspaceId, engagementId], references: [workspaceId, id], onDelete: Restrict)
+  policy         EngagementPolicy         @relation(fields: [workspaceId, engagementId, policyRevision], references: [workspaceId, engagementId, revision], onDelete: Restrict)
+  document       AuthorizationDocument    @relation(fields: [workspaceId, engagementId, documentId], references: [workspaceId, engagementId, id], onDelete: Restrict)
+  revocation     AuthorizationRevocation?
+  scans          Scan[]
+
+  @@unique([workspaceId, engagementId, id])
+  @@index([workspaceId, engagementId, policyRevision, validUntil])
+}
+
+model AuthorizationRevocation {
+  actor     User               @relation(fields: [actorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id        String             @id @default(cuid())
+  grantId   String             @unique
+  actorId   String
+  reason    String
+  createdAt DateTime           @default(now())
+  grant     AuthorizationGrant @relation(fields: [grantId], references: [id], onDelete: Restrict)
+}
+
+model EngagementTransition {
+  grant              AuthorizationGrant? @relation(fields: [workspaceId, engagementId, grantId], references: [workspaceId, engagementId, id], onDelete: Restrict)
+  actor              User                @relation(fields: [actorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id                 String              @id @default(cuid())
+  workspaceId        String
+  engagementId       String
+  fromState          EngagementState
+  toState            EngagementState
+  actorId            String
+  authorizationBasis String
+  grantId            String?
+  version            Int
+  reason             String
+  createdAt          DateTime            @default(now())
+  engagement         Engagement          @relation(fields: [workspaceId, engagementId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, engagementId, version])
+}
+
+model ExecutionDecision {
+  scan           Scan                @relation(fields: [workspaceId, scanId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction)
+  grant          AuthorizationGrant? @relation(fields: [workspaceId, engagementId, grantId], references: [workspaceId, engagementId, id], onDelete: Restrict, onUpdate: NoAction)
+  actor          User                @relation(fields: [actorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id             String              @id @default(cuid())
+  workspaceId    String
+  engagementId   String
+  scanId         String
+  actorId        String
+  grantId        String?
+  policyRevision Int
+  tool           String
+  phase          String
+  method         String
+  // Query strings and credentials are never included in decision records.
+  destination    String
+  risk           ActionRisk
+  permitted      Boolean
+  code           String
+  createdAt      DateTime            @default(now())
+  engagement     Engagement          @relation(fields: [workspaceId, engagementId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@index([workspaceId, engagementId, createdAt, id])
+  @@index([workspaceId, scanId, createdAt])
 }

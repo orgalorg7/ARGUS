@@ -1,7 +1,6 @@
 import type { PrismaClient, ScanState as ScanStateType } from "@aasp/database";
 import {
   AIAnalysisStatus,
-  FindingStatus,
   JobStatus,
   ModelProviderStatus,
   Prisma,
@@ -399,41 +398,20 @@ async function applyAnalysis(
   },
   output: QwenAnalysisOutput,
 ): Promise<void> {
-  const manualVerificationRequired =
-    finding.manualVerificationRequired || output.manualVerificationRequired;
-  await prisma.$transaction([
-    prisma.finding.update({
-      where: { id: finding.id },
-      data: {
-        title: output.title,
-        severity: boundedSeverity(finding.severity, output.severity),
-        confidence: Math.min(0.99, output.confidence),
-        cwe: output.cwe,
-        owasp: output.owasp,
-        description: output.description,
-        technicalImpact: output.technicalImpact,
-        businessImpact: output.businessImpact,
-        remediation: output.remediation,
-        manualVerificationRequired,
-        status: manualVerificationRequired
-          ? FindingStatus.MANUAL_VERIFICATION_REQUIRED
-          : FindingStatus.OPEN,
-      },
-    }),
-    prisma.findingHistory.create({
-      data: {
-        findingId: finding.id,
-        action: "QWEN_ANALYSIS_APPLIED",
-        before: jsonValue({ severity: finding.severity, confidence: finding.confidence }),
-        after: jsonValue({
-          severity: boundedSeverity(finding.severity, output.severity),
-          confidence: output.confidence,
-          likelyFalsePositive: output.likelyFalsePositive,
-          evidenceIds: output.evidenceIds,
-        }),
-      },
-    }),
-  ]);
+  await prisma.findingHistory.create({
+    data: {
+      findingId: finding.id,
+      action: "AI_REVIEW_SUGGESTED",
+      before: jsonValue({ severity: finding.severity, confidence: finding.confidence }),
+      after: jsonValue({
+        suggestedSeverity: boundedSeverity(finding.severity, output.severity),
+        suggestedConfidence: output.confidence,
+        likelyFalsePositive: output.likelyFalsePositive,
+        evidenceIds: output.evidenceIds,
+        manualVerificationRequired: output.manualVerificationRequired,
+      }),
+    },
+  });
 }
 
 function attachFailure(

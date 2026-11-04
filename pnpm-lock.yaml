@@ -49,9 +49,15 @@ importers:
       '@aasp/ai-engine':
         specifier: workspace:*
         version: link:../../services/ai-engine
+      '@aasp/authorization-engine':
+        specifier: workspace:*
+        version: link:../../services/authorization-engine
       '@aasp/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@aasp/engagement-engine':
+        specifier: workspace:*
+        version: link:../../services/engagement-engine
       '@aasp/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
@@ -129,6 +135,9 @@ importers:
       '@aasp/api-discovery':
         specifier: workspace:*
         version: link:../../services/api-discovery
+      '@aasp/authorization-engine':
+        specifier: workspace:*
+        version: link:../../services/authorization-engine
       '@aasp/correlation-engine':
         specifier: workspace:*
         version: link:../../services/correlation-engine
@@ -138,6 +147,9 @@ importers:
       '@aasp/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@aasp/engagement-engine':
+        specifier: workspace:*
+        version: link:../../services/engagement-engine
       '@aasp/evidence-engine':
         specifier: workspace:*
         version: link:../../services/evidence-engine
@@ -147,9 +159,15 @@ importers:
       '@aasp/logger':
         specifier: workspace:*
         version: link:../../packages/logger
+      '@aasp/longitudinal-engine':
+        specifier: workspace:*
+        version: link:../../services/longitudinal-engine
       '@aasp/report-engine':
         specifier: workspace:*
         version: link:../../services/report-engine
+      '@aasp/scanner-application':
+        specifier: workspace:*
+        version: link:../../services/scanner-application
       '@aasp/scanner-auth-surface':
         specifier: workspace:*
         version: link:../../services/scanner-auth-surface
@@ -234,6 +252,15 @@ importers:
         specifier: workspace:*
         version: link:../crawler
 
+  services/authorization-engine:
+    dependencies:
+      '@aasp/scope-engine':
+        specifier: workspace:*
+        version: link:../scope-engine
+      '@aasp/security-core':
+        specifier: workspace:*
+        version: link:../../packages/security-core
+
   services/correlation-engine:
     dependencies:
       '@aasp/finding-engine':
@@ -255,6 +282,21 @@ importers:
         specifier: 5.11.1
         version: 5.11.1
 
+  services/engagement-engine:
+    dependencies:
+      '@aasp/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@aasp/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
+      '@aasp/scope-engine':
+        specifier: workspace:*
+        version: link:../scope-engine
+      '@aasp/security-core':
+        specifier: workspace:*
+        version: link:../../packages/security-core
+
   services/evidence-engine:
     dependencies:
       '@aasp/database':
@@ -273,7 +315,29 @@ importers:
         specifier: workspace:*
         version: link:../../packages/schemas
 
-  services/report-engine: {}
+  services/longitudinal-engine:
+    dependencies:
+      '@aasp/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
+
+  services/report-engine:
+    dependencies:
+      '@aasp/security-core':
+        specifier: workspace:*
+        version: link:../../packages/security-core
+
+  services/scanner-application:
+    dependencies:
+      '@aasp/scanner-integrations':
+        specifier: workspace:*
+        version: link:../scanner-integrations
+      '@aasp/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
+      '@aasp/scope-engine':
+        specifier: workspace:*
+        version: link:../scope-engine
 
   services/scanner-auth-surface:
     dependencies:

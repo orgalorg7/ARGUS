@@ -33,6 +33,10 @@ async function proxy(request: Request, context: { params: Promise<{ path: string
         ? { "content-disposition": response.headers.get("content-disposition") as string }
         : {}),
       "x-content-type-options": "nosniff",
+      "cache-control": "no-store",
+      ...(response.headers.get("content-security-policy")
+        ? { "content-security-policy": response.headers.get("content-security-policy") as string }
+        : {}),
     },
   });
 }
@@ -40,4 +44,5 @@ async function proxy(request: Request, context: { params: Promise<{ path: string
 export const GET = proxy;
 export const POST = proxy;
 export const PATCH = proxy;
+export const PUT = proxy;
 export const DELETE = proxy;

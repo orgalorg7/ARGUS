@@ -10,7 +10,9 @@ export type ScopeBlockReason =
   | "ADDRESS_BLOCKED"
   | "DNS_REBINDING_DETECTED"
   | "REDIRECT_LIMIT_EXCEEDED"
-  | "UNSAFE_METHOD";
+  | "UNSAFE_METHOD"
+  | "METHOD_NOT_AUTHORIZED"
+  | "REQUEST_BODY_TOO_LARGE";
 
 export class ScopeViolationError extends Error {
   readonly code = "SCOPE_VIOLATION";

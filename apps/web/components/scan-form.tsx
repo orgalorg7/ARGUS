@@ -6,8 +6,12 @@ import { useState } from "react";
 export function ScanForm({
   workspaceId,
   targets,
+  engagementId,
+  limits,
 }: {
   workspaceId: string;
+  engagementId: string;
+  limits: { maxRequests: number; requestsPerSecond: number; maxConcurrency: number };
   targets: Array<{ id: string; name: string; origin: string }>;
 }) {
   const router = useRouter();
@@ -21,6 +25,7 @@ export function ScanForm({
           setError("");
           const data = new FormData(event.currentTarget);
           const payload = {
+            engagementId,
             targetId: data.get("targetId"),
             name: data.get("name"),
             profile: data.get("profile"),
@@ -85,15 +90,34 @@ export function ScanForm({
         </label>
         <label>
           Max requests
-          <input name="maxRequests" type="number" min="1" defaultValue="2000" />
+          <input
+            name="maxRequests"
+            type="number"
+            min="1"
+            max={limits.maxRequests}
+            defaultValue={Math.min(2000, limits.maxRequests)}
+          />
         </label>
         <label>
           Requests / second
-          <input name="requestsPerSecond" type="number" min="0.1" step="0.1" defaultValue="2" />
+          <input
+            name="requestsPerSecond"
+            type="number"
+            min="0.1"
+            step="0.1"
+            max={limits.requestsPerSecond}
+            defaultValue={Math.min(2, limits.requestsPerSecond)}
+          />
         </label>
         <label>
           Concurrency
-          <input name="concurrency" type="number" min="1" defaultValue="4" />
+          <input
+            name="concurrency"
+            type="number"
+            min="1"
+            max={limits.maxConcurrency}
+            defaultValue={Math.min(4, limits.maxConcurrency)}
+          />
         </label>
         <label>
           Timeout ms

@@ -1,9 +1,12 @@
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, rename, writeFile, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { Prisma, PrismaClient } from "@aasp/database";
 import {
   AIAnalysisStatus,
+  type FindingTrendStatus,
   JobStatus,
+  type RemediationPriority,
   ReportStatus,
   ReportType,
   ScanState,
@@ -11,7 +14,13 @@ import {
 } from "@aasp/database";
 import { logger } from "@aasp/logger";
 import {
+  compareAssessments,
+  type AssessmentSnapshot,
+  type ComparableFinding,
+} from "@aasp/longitudinal-engine";
+import {
   generateCompleteScanReport,
+  generateExecutiveReport,
   generateVulnerabilityReport,
   type ReportFinding,
   type ScanReportInput,
@@ -35,6 +44,18 @@ export interface Day5WorkerRuntime {
 }
 
 const reportQueueName = "scan.report";
+const comparisonRelevantStages = new Set<ScanState>([
+  ScanState.VALIDATING_SCOPE,
+  ScanState.DISCOVERY,
+  ScanState.CRAWLING,
+  ScanState.API_DISCOVERY,
+  ScanState.FINGERPRINTING,
+  ScanState.PASSIVE_ANALYSIS,
+  ScanState.SAFE_ACTIVE_ANALYSIS,
+  ScanState.AUTHORIZATION_ANALYSIS,
+  ScanState.NORMALIZING,
+  ScanState.CORRELATING,
+]);
 
 function jsonValue(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -52,12 +73,199 @@ function analysisContext(output: Prisma.JsonValue | null): {
     return { likelyFalsePositive: null, reasoningSummary: null };
   }
   const record = output as Record<string, Prisma.JsonValue>;
+  const likelyFalsePositive = record["likelyFalsePositive"] ?? record["likely_false_positive"];
+  const reasoningSummary = record["reasoningSummary"] ?? record["reasoning_summary"];
   return {
-    likelyFalsePositive:
-      typeof record["likely_false_positive"] === "boolean" ? record["likely_false_positive"] : null,
-    reasoningSummary:
-      typeof record["reasoning_summary"] === "string" ? record["reasoning_summary"] : null,
+    likelyFalsePositive: typeof likelyFalsePositive === "boolean" ? likelyFalsePositive : null,
+    reasoningSummary: typeof reasoningSummary === "string" ? reasoningSummary : null,
   };
+}
+
+function requestEvidenceCount(evidence: readonly { requestMetadata: Prisma.JsonValue }[]): number {
+  return evidence.filter(({ requestMetadata }) => {
+    return (
+      requestMetadata !== null &&
+      typeof requestMetadata === "object" &&
+      !Array.isArray(requestMetadata) &&
+      typeof (requestMetadata as Record<string, Prisma.JsonValue>)["method"] === "string"
+    );
+  }).length;
+}
+
+function jsonRecord(value: Prisma.JsonValue | null): Record<string, Prisma.JsonValue> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, Prisma.JsonValue>)
+    : {};
+}
+
+function jsonStrings(value: Prisma.JsonValue | undefined): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+async function assessmentSnapshot(
+  prisma: PrismaClient,
+  workspaceId: string,
+  scanId: string,
+): Promise<AssessmentSnapshot> {
+  const scan = await prisma.scan.findFirst({
+    where: { id: scanId, workspaceId },
+    include: {
+      config: true,
+      findings: {
+        include: {
+          occurrences: {
+            include: {
+              observation: { select: { asset: true, endpoint: true, method: true } },
+            },
+          },
+        },
+      },
+      assets: true,
+      technologies: true,
+      stages: true,
+      evidence: { select: { requestMetadata: true } },
+    },
+  });
+  if (!scan?.config)
+    throw new Error("Assessment snapshot requires a persisted scan configuration.");
+  const findings: ComparableFinding[] = scan.findings.map((finding) => ({
+    id: finding.id,
+    correlationKey: finding.correlationKey,
+    severity: finding.severity,
+    confidence: finding.confidence,
+    category: finding.category,
+    asset: finding.asset,
+    endpoint: finding.endpoint,
+    recurrenceCount: finding.recurrenceCount,
+    affectedEndpointCount: new Set(
+      finding.occurrences.map(
+        ({ observation }) =>
+          `${observation.asset}|${observation.method ?? ""}|${observation.endpoint ?? ""}`,
+      ),
+    ).size,
+  }));
+  return {
+    scanId: scan.id,
+    findings,
+    coverage: {
+      profile: scan.config.profile,
+      urls: await prisma.discoveredURL.count({ where: { workspaceId, scanId } }),
+      endpoints: await prisma.discoveredEndpoint.count({ where: { workspaceId, scanId } }),
+      requests: requestEvidenceCount(scan.evidence),
+      completedModules: scan.stages
+        .filter(
+          ({ name, status }) =>
+            comparisonRelevantStages.has(name) && status === StageStatus.COMPLETED,
+        )
+        .map(({ name }) => name),
+      failedOrDegradedModules: scan.stages
+        .filter(
+          ({ name, status }) =>
+            comparisonRelevantStages.has(name) &&
+            (status === StageStatus.FAILED || status === StageStatus.DEGRADED),
+        )
+        .map(({ name }) => name),
+    },
+    inventory: {
+      assets: scan.assets.map(({ assetType, value }) => `${assetType}|${value}`),
+      technologies: scan.technologies.map(
+        ({ technology, possibleVersion }) =>
+          `${technology}|${possibleVersion ?? "UNKNOWN_VERSION"}`,
+      ),
+    },
+  };
+}
+
+async function persistMonthlyComparison(
+  prisma: PrismaClient,
+  payload: ReportPayload,
+): Promise<void> {
+  const current = await prisma.scan.findFirst({
+    where: { id: payload.scanId, workspaceId: payload.workspaceId },
+    select: { id: true, targetId: true, createdAt: true },
+  });
+  if (!current) throw new Error("Current scan was not found for monthly comparison.");
+  const previous = await prisma.scan.findFirst({
+    where: {
+      workspaceId: payload.workspaceId,
+      targetId: current.targetId,
+      id: { not: current.id },
+      createdAt: { lt: current.createdAt },
+      state: { in: [ScanState.COMPLETED, ScanState.COMPLETED_WITH_WARNINGS] },
+    },
+    select: { id: true },
+    orderBy: [{ completedAt: "desc" }, { createdAt: "desc" }],
+  });
+  const currentSnapshot = await assessmentSnapshot(prisma, payload.workspaceId, payload.scanId);
+  const previousSnapshot = previous
+    ? await assessmentSnapshot(prisma, payload.workspaceId, previous.id)
+    : null;
+  const result = compareAssessments(currentSnapshot, previousSnapshot);
+  const comparison = await prisma.scanComparison.upsert({
+    where: { scanId: payload.scanId },
+    create: {
+      workspaceId: payload.workspaceId,
+      scanId: payload.scanId,
+      previousScanId: result.previousScanId,
+      coverageSufficient: result.coverageSufficient,
+      coverageRatio: result.coverageRatio,
+      summary: jsonValue({
+        counts: result.counts,
+        coverageReasons: result.coverageReasons,
+        newAssets: result.newAssets,
+        removedAssets: result.removedAssets,
+        technologyChanges: result.technologyChanges,
+      }),
+    },
+    update: {
+      previousScanId: result.previousScanId,
+      coverageSufficient: result.coverageSufficient,
+      coverageRatio: result.coverageRatio,
+      summary: jsonValue({
+        counts: result.counts,
+        coverageReasons: result.coverageReasons,
+        newAssets: result.newAssets,
+        removedAssets: result.removedAssets,
+        technologyChanges: result.technologyChanges,
+      }),
+    },
+  });
+  await prisma.findingComparison.deleteMany({ where: { scanComparisonId: comparison.id } });
+  if (result.findings.length > 0) {
+    await prisma.findingComparison.createMany({
+      data: result.findings.map((finding) => ({
+        scanComparisonId: comparison.id,
+        currentFindingId: finding.currentFindingId,
+        previousFindingId: finding.previousFindingId,
+        correlationKey: finding.correlationKey,
+        trendStatus: finding.trendStatus as FindingTrendStatus,
+        severityBefore: finding.severityBefore,
+        severityAfter: finding.severityAfter,
+        reason: finding.reason,
+      })),
+    });
+  }
+  for (const finding of result.findings) {
+    if (!finding.currentFindingId || !finding.remediationPriority) continue;
+    const previousFinding = finding.previousFindingId
+      ? await prisma.finding.findUnique({
+          where: { id: finding.previousFindingId },
+          select: { firstSeen: true },
+        })
+      : null;
+    await prisma.finding.update({
+      where: { id: finding.currentFindingId },
+      data: {
+        trendStatus: finding.trendStatus as FindingTrendStatus,
+        remediationPriority: finding.remediationPriority as RemediationPriority,
+        recurrenceCount: finding.recurrenceCount,
+        previousFindingId: finding.previousFindingId,
+        ...(previousFinding ? { firstSeen: previousFinding.firstSeen } : {}),
+      },
+    });
+  }
 }
 
 async function atomicWrite(path: string, value: string): Promise<void> {
@@ -89,6 +297,9 @@ async function persistReport(
   const data = {
     path: input.path,
     sha256: input.sha256,
+    jsonSha256: createHash("sha256")
+      .update(await readFile(input.path.replace(/(?:\.pdf-ready)?\.html$/u, ".json")))
+      .digest("hex"),
     status: ReportStatus.GENERATED,
     generatedAt: new Date(),
     errorMessage: null,
@@ -122,6 +333,18 @@ async function buildInput(prisma: PrismaClient, payload: ReportPayload): Promise
       endpoints: { include: { parameters: true }, orderBy: [{ asset: "asc" }, { path: "asc" }] },
       technologies: { orderBy: { technology: "asc" } },
       observations: { select: { scanner: true } },
+      aiAnalyses: {
+        select: { findingId: true, status: true, schemaValid: true, evidenceValid: true },
+      },
+      currentComparison: {
+        include: {
+          findings: {
+            include: {
+              previousFinding: { select: { publicId: true, title: true, severity: true } },
+            },
+          },
+        },
+      },
       findings: {
         orderBy: { publicId: "asc" },
         include: {
@@ -136,6 +359,10 @@ async function buildInput(prisma: PrismaClient, payload: ReportPayload): Promise
             take: 1,
           },
         },
+      },
+      authorizationTestResults: {
+        include: { testCase: true },
+        orderBy: { createdAt: "asc" },
       },
     },
   });
@@ -166,6 +393,9 @@ async function buildInput(prisma: PrismaClient, payload: ReportPayload): Promise
       scannerSources: finding.scannerSources,
       remediation: finding.remediation,
       manualVerificationRequired: finding.manualVerificationRequired,
+      trendStatus: finding.trendStatus,
+      remediationPriority: finding.remediationPriority,
+      recurrenceCount: finding.recurrenceCount,
       ...context,
       firstSeen: finding.firstSeen.toISOString(),
       lastSeen: finding.lastSeen.toISOString(),
@@ -192,6 +422,102 @@ async function buildInput(prisma: PrismaClient, payload: ReportPayload): Promise
     followRedirects: scan.config.followRedirects,
     includeSubdomains: scan.config.includeSubdomains,
   };
+  const summary = jsonRecord(scan.currentComparison?.summary ?? null);
+  const rawCounts = jsonRecord(summary["counts"] ?? null);
+  const comparisonCounts = {
+    NEW: typeof rawCounts["NEW"] === "number" ? rawCounts["NEW"] : 0,
+    RECURRING: typeof rawCounts["RECURRING"] === "number" ? rawCounts["RECURRING"] : 0,
+    RESOLVED: typeof rawCounts["RESOLVED"] === "number" ? rawCounts["RESOLVED"] : 0,
+    REGRESSED: typeof rawCounts["REGRESSED"] === "number" ? rawCounts["REGRESSED"] : 0,
+    CHANGED: typeof rawCounts["CHANGED"] === "number" ? rawCounts["CHANGED"] : 0,
+    UNVERIFIED: typeof rawCounts["UNVERIFIED"] === "number" ? rawCounts["UNVERIFIED"] : 0,
+  };
+  const technologyChanges = jsonRecord(summary["technologyChanges"] ?? null);
+  const comparisonFindings = scan.currentComparison?.findings ?? [];
+  const toPriorFinding = (trendStatus: "RESOLVED" | "UNVERIFIED") =>
+    comparisonFindings
+      .filter((item) => item.trendStatus === trendStatus && item.previousFinding)
+      .map((item) => ({
+        id: item.previousFinding!.publicId,
+        title: item.previousFinding!.title,
+        severity: item.previousFinding!.severity,
+        reason: item.reason,
+      }));
+  const provider = await prisma.modelProvider.findFirst({
+    where: { OR: [{ workspaceId: payload.workspaceId }, { workspaceId: null }] },
+    select: { id: true },
+  });
+  const validatedAnalyses = new Set(
+    scan.aiAnalyses
+      .filter(
+        ({ findingId, status, schemaValid, evidenceValid }) =>
+          findingId &&
+          status === AIAnalysisStatus.COMPLETED &&
+          schemaValid === true &&
+          evidenceValid === true,
+      )
+      .map(({ findingId }) => findingId),
+  ).size;
+  const failedOrWaitingAnalyses = Math.max(0, findings.length - validatedAnalyses);
+  const qwenStatus = !provider
+    ? "NOT_CONFIGURED"
+    : findings.length === 0 || scan.aiAnalyses.length === 0
+      ? "NOT_RUN"
+      : validatedAnalyses === findings.length
+        ? "COMPLETED"
+        : validatedAnalyses > 0
+          ? "PARTIAL"
+          : "FAILED_OR_WAITING";
+  const authorizationMatrices = scan.authorizationTestResults.map((result) => {
+    const matrix = jsonRecord(result.matrix);
+    const observations = Array.isArray(matrix["observations"])
+      ? matrix["observations"].filter(
+          (item): item is Record<string, Prisma.JsonValue> =>
+            Boolean(item) && typeof item === "object" && !Array.isArray(item),
+        )
+      : [];
+    const differences = Array.isArray(matrix["differences"])
+      ? matrix["differences"].filter(
+          (item): item is Record<string, Prisma.JsonValue> =>
+            Boolean(item) && typeof item === "object" && !Array.isArray(item),
+        )
+      : [];
+    return {
+      testCaseId: result.testCaseId,
+      name: result.testCase.name,
+      method: result.testCase.method,
+      endpointTemplate: result.testCase.endpointTemplate,
+      degraded: result.degraded,
+      incompleteIdentityCount: result.incompleteIdentityIds.length,
+      cells: observations.map((observation) => {
+        const identityId =
+          typeof observation["identityId"] === "string" ? observation["identityId"] : "unknown";
+        const response = jsonRecord(observation["response"] ?? null);
+        const difference = differences.find((item) => item["comparisonIdentityId"] === identityId);
+        return {
+          identityLabel:
+            typeof observation["identityLabel"] === "string"
+              ? observation["identityLabel"]
+              : identityId,
+          expected:
+            typeof observation["expected"] === "string" ? observation["expected"] : "UNKNOWN",
+          statusCode: typeof response["statusCode"] === "number" ? response["statusCode"] : 0,
+          classification:
+            difference && typeof difference["classification"] === "string"
+              ? difference["classification"]
+              : "BASELINE",
+          severity:
+            difference && typeof difference["severity"] === "string"
+              ? difference["severity"]
+              : "INFO",
+          confidence:
+            difference && typeof difference["confidence"] === "number"
+              ? difference["confidence"]
+              : 1,
+        };
+      }),
+    };
+  });
   return {
     scan: {
       id: scan.id,
@@ -227,6 +553,7 @@ async function buildInput(prisma: PrismaClient, payload: ReportPayload): Promise
       },
     ],
     config: configuration,
+    authorizationMatrices,
     stages: scan.stages.map((stage) => ({
       name: stage.name,
       status: stage.status,
@@ -266,15 +593,29 @@ async function buildInput(prisma: PrismaClient, payload: ReportPayload): Promise
       evidenceIds: technology.evidenceIds,
     })),
     findings,
+    comparison: {
+      previousScanId: scan.currentComparison?.previousScanId ?? null,
+      coverageSufficient: scan.currentComparison?.coverageSufficient ?? false,
+      coverageRatio: scan.currentComparison?.coverageRatio ?? 0,
+      coverageReasons: jsonStrings(summary["coverageReasons"]),
+      counts: comparisonCounts,
+      newAssets: jsonStrings(summary["newAssets"]),
+      removedAssets: jsonStrings(summary["removedAssets"]),
+      technologyChanges: {
+        added: jsonStrings(technologyChanges["added"]),
+        removed: jsonStrings(technologyChanges["removed"]),
+      },
+      resolvedFindings: toPriorFinding("RESOLVED"),
+      unverifiedFindings: toPriorFinding("UNVERIFIED"),
+    },
+    qwenAnalysis: {
+      status: qwenStatus,
+      totalFindings: findings.length,
+      validatedAnalyses,
+      failedOrWaitingAnalyses,
+    },
     scannerSources: [...new Set(scan.observations.map(({ scanner }) => scanner))].sort(),
-    requestsPerformed: evidence.filter(({ requestMetadata }) => {
-      return (
-        requestMetadata !== null &&
-        typeof requestMetadata === "object" &&
-        !Array.isArray(requestMetadata) &&
-        typeof (requestMetadata as Record<string, Prisma.JsonValue>)["method"] === "string"
-      );
-    }).length,
+    requestsPerformed: requestEvidenceCount(evidence),
     failedOrDegradedStages: scan.stages
       .filter(({ status }) => status === StageStatus.FAILED || status === StageStatus.DEGRADED)
       .map((stage) => ({
@@ -348,6 +689,7 @@ async function processReport(
     return { reports: 0, reportDirectory: "CANCELLED" };
   }
 
+  await persistMonthlyComparison(prisma, job.data);
   const input = await buildInput(prisma, job.data);
   if (input.findings.some(({ evidence }) => evidence.length === 0)) {
     throw new Error("Report generation refused a finding without persisted evidence.");
@@ -355,13 +697,20 @@ async function processReport(
   const reportsRoot = resolve(process.env["REPORTS_ROOT"] ?? "../../reports");
   const scanDirectory = resolve(reportsRoot, scanId);
   const complete = generateCompleteScanReport(input);
+  const executive = generateExecutiveReport(input);
   const completePath = resolve(scanDirectory, "scan-report.html");
   const completeJsonPath = resolve(scanDirectory, "scan-report.json");
   const pdfReadyPath = resolve(scanDirectory, "scan-report.pdf-ready.html");
+  const executivePath = resolve(scanDirectory, "executive-report.html");
+  const executiveJsonPath = resolve(scanDirectory, "executive-report.json");
+  const executivePdfReadyPath = resolve(scanDirectory, "executive-report.pdf-ready.html");
   await Promise.all([
     atomicWrite(completePath, complete.html),
     atomicWrite(completeJsonPath, `${JSON.stringify(complete.document, null, 2)}\n`),
     atomicWrite(pdfReadyPath, complete.pdfReadyHtml),
+    atomicWrite(executivePath, executive.html),
+    atomicWrite(executiveJsonPath, `${JSON.stringify(executive.document, null, 2)}\n`),
+    atomicWrite(executivePdfReadyPath, executive.pdfReadyHtml),
   ]);
   await Promise.all([
     persistReport(prisma, {
@@ -377,6 +726,20 @@ async function processReport(
       type: ReportType.COMPLETE_SCAN_PDF_READY,
       path: pdfReadyPath,
       sha256: complete.pdfReadySha256,
+    }),
+    persistReport(prisma, {
+      workspaceId,
+      scanId,
+      type: ReportType.EXECUTIVE,
+      path: executivePath,
+      sha256: executive.sha256,
+    }),
+    persistReport(prisma, {
+      workspaceId,
+      scanId,
+      type: ReportType.EXECUTIVE_PDF_READY,
+      path: executivePdfReadyPath,
+      sha256: executive.pdfReadySha256,
     }),
   ]);
   await prisma.$transaction([
@@ -404,7 +767,7 @@ async function processReport(
     }),
   ]);
 
-  let generated = 2;
+  let generated = 4;
   for (const [index, finding] of input.findings.entries()) {
     const cancelRequestedAt = await prisma.scan.findUnique({
       where: { id: scanId },
@@ -494,10 +857,14 @@ async function processReport(
     ),
   };
   const finalizedComplete = generateCompleteScanReport(finalizedInput);
+  const finalizedExecutive = generateExecutiveReport(finalizedInput);
   await Promise.all([
     atomicWrite(completePath, finalizedComplete.html),
     atomicWrite(completeJsonPath, `${JSON.stringify(finalizedComplete.document, null, 2)}\n`),
     atomicWrite(pdfReadyPath, finalizedComplete.pdfReadyHtml),
+    atomicWrite(executivePath, finalizedExecutive.html),
+    atomicWrite(executiveJsonPath, `${JSON.stringify(finalizedExecutive.document, null, 2)}\n`),
+    atomicWrite(executivePdfReadyPath, finalizedExecutive.pdfReadyHtml),
   ]);
   await Promise.all([
     persistReport(prisma, {
@@ -513,6 +880,20 @@ async function processReport(
       type: ReportType.COMPLETE_SCAN_PDF_READY,
       path: pdfReadyPath,
       sha256: finalizedComplete.pdfReadySha256,
+    }),
+    persistReport(prisma, {
+      workspaceId,
+      scanId,
+      type: ReportType.EXECUTIVE,
+      path: executivePath,
+      sha256: finalizedExecutive.sha256,
+    }),
+    persistReport(prisma, {
+      workspaceId,
+      scanId,
+      type: ReportType.EXECUTIVE_PDF_READY,
+      path: executivePdfReadyPath,
+      sha256: finalizedExecutive.pdfReadySha256,
     }),
   ]);
   for (const finding of finalizedInput.findings) {

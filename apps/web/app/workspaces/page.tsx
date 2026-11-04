@@ -49,7 +49,7 @@ export default async function WorkspacesPage() {
             {workspaces.map((workspace) => (
               <Link
                 className="workspace-row linked-row"
-                href={`/scans?workspaceId=${workspace.id}`}
+                href={`/engagements?workspaceId=${workspace.id}`}
                 key={workspace.id}
               >
                 <div>

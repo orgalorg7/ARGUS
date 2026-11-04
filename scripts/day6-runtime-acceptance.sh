@@ -17,7 +17,9 @@ target=$(curl --fail --silent --show-error -X POST "$api_url/workspaces/$workspa
 target_id=$(jq -er '.id' <<<"$target")
 test "$(jq -r '.status' <<<"$target")" = "READY"
 
-scan=$(curl --fail --silent --show-error -X POST "$api_url/workspaces/$workspace_id/scans" -H "$authorization" -H 'content-type: application/json' --data "{\"targetId\":\"$target_id\",\"name\":\"Day 6 evidence pipeline $suffix\",\"profile\":\"LIGHT\"}")
+source "$(dirname "${BASH_SOURCE[0]}")/authorize-fixture.sh"
+engagement_id=$(authorize_owned_fixture)
+scan=$(curl --fail --silent --show-error -X POST "$api_url/workspaces/$workspace_id/scans" -H "$authorization" -H 'content-type: application/json' --data "{\"targetId\":\"$target_id\",\"engagementId\":\"$engagement_id\",\"name\":\"Day 6 evidence pipeline $suffix\",\"profile\":\"LIGHT\"}")
 scan_id=$(jq -er '.id' <<<"$scan")
 curl --fail --silent --show-error -X POST "$api_url/workspaces/$workspace_id/scans/$scan_id/start" -H "$authorization" -H 'content-type: application/json' --data '{}' >/dev/null
 
@@ -40,14 +42,14 @@ finding_count=$(jq 'length' <<<"$findings")
 report_count=$(jq 'length' <<<"$reports")
 test "$finding_count" -gt 0
 test "$(jq 'all(.[]; (.evidenceLinks | length) > 0)' <<<"$findings")" = "true"
-test "$report_count" -eq $((finding_count + 2))
+test "$report_count" -eq $((finding_count + 4))
 
 complete_report_id=$(jq -er '.[] | select(.type=="COMPLETE_SCAN") | .id' <<<"$reports")
 report_status=$(curl --silent --show-error -o /tmp/aasp-day6-report.html -w '%{http_code}' "$api_url/workspaces/$workspace_id/scans/$scan_id/reports/$complete_report_id/content" -H "$authorization")
 test "$report_status" = "200"
-grep -q 'Complete scan report' /tmp/aasp-day6-report.html
+grep -q 'Complete technical report' /tmp/aasp-day6-report.html
 
-cancel_scan=$(curl --fail --silent --show-error -X POST "$api_url/workspaces/$workspace_id/scans" -H "$authorization" -H 'content-type: application/json' --data "{\"targetId\":\"$target_id\",\"name\":\"Day 6 cancellation check $suffix\",\"profile\":\"LIGHT\"}")
+cancel_scan=$(curl --fail --silent --show-error -X POST "$api_url/workspaces/$workspace_id/scans" -H "$authorization" -H 'content-type: application/json' --data "{\"targetId\":\"$target_id\",\"engagementId\":\"$engagement_id\",\"name\":\"Day 6 cancellation check $suffix\",\"profile\":\"LIGHT\"}")
 cancel_scan_id=$(jq -er '.id' <<<"$cancel_scan")
 cancel_result=$(curl --fail --silent --show-error -X POST "$api_url/workspaces/$workspace_id/scans/$cancel_scan_id/cancel" -H "$authorization" -H 'content-type: application/json' --data '{}')
 test "$(jq -r '.state' <<<"$cancel_result")" = "CANCELLED"

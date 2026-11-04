@@ -2,17 +2,17 @@
 
 ## Engagement and execution boundary
 
-Business authorization is established outside the platform before target entry. The platform does not perform domain-ownership challenges. It does require a valid persisted target scope and sufficient workspace permission before scan creation/start. A target is atomically reserved as `SCANNING` when its scan is queued, and workers reject jobs whose target is not in that state.
+Business authorization must be recorded as an engagement grant referencing an encrypted preserved document and immutable scope/ROE revision. Queue admission and every worker HTTP transport recheck current organization/workspace membership, grant validity/revocation, engagement lifecycle, actual destination and limits. See [FOUNDATION.md](FOUNDATION.md) for the implemented boundary and release blockers. Domain ownership challenges are not a substitute for this permission record.
 
 ## Network boundary
 
 Only HTTP and HTTPS are accepted. User information in URLs is rejected. Hostnames are normalized to ASCII and matched against configured allowed domains on an exact or dot-delimited subdomain boundary. Only configured ports are accepted. Excluded paths are blocked. DNS is resolved immediately before transport, every answer is classified, prohibited ranges are blocked unless the target explicitly permits private networking, and the approved address is pinned into the socket lookup. Redirects are rechecked before following.
 
-The scope client permits only GET, HEAD, and OPTIONS. It imposes time and response-size limits and removes sensitive request headers when following redirects. Scanner services must not instantiate general-purpose network clients.
+Production worker policy currently permits only GET, HEAD, and OPTIONS, regardless of broader low-level transport capabilities. It imposes time and response-size limits and removes sensitive request headers when following redirects. Scanner services must not instantiate general-purpose network clients.
 
 ## Tenant boundary
 
-JWT authentication identifies a current active user. Workspace membership and role are loaded by the backend for each workspace route. Resource queries combine `workspaceId` with resource identifiers. Hiding frontend controls is not considered authorization.
+JWT authentication identifies a current active user. Organization membership, workspace membership and role are loaded by the backend for each workspace route. Resource queries combine `workspaceId` with resource identifiers. Hiding frontend controls is not considered authorization.
 
 ## Evidence and model boundary
 
@@ -21,3 +21,5 @@ Target content is untrusted data. Evidence redaction removes credential-bearing 
 ## Current implementation boundary
 
 The complete worker pipeline consumes persisted jobs and uses the same target-derived scope policy for discovery, crawling, API discovery, fingerprinting, passive analysis, and safe active analysis. Model output cannot widen this boundary or invoke network operations.
+
+Evidence and audit records are append-only at the database layer. Authorization originals are encrypted and bound to tenant context. Report downloads verify hashes and reject filesystem escapes. Secret pattern detection does not replace manual redaction or publication approval.

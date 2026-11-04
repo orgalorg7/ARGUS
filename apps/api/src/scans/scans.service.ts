@@ -1,5 +1,6 @@
-import { createReadStream } from "node:fs";
-import { access } from "node:fs/promises";
+import { Readable } from "node:stream";
+import { readVerifiedReport } from "./report-store.js";
+import { authorizeScanQueue, requirePermission, GovernanceError } from "@aasp/engagement-engine";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
   BadRequestException,
@@ -34,6 +35,7 @@ const pipelineStages: ScanState[] = [
   "FINGERPRINTING",
   "PASSIVE_ANALYSIS",
   "SAFE_ACTIVE_ANALYSIS",
+  "AUTHORIZATION_ANALYSIS",
   "NORMALIZING",
   "CORRELATING",
   "AI_ANALYSIS",
@@ -45,7 +47,12 @@ export function resolveStoredReportPath(
   reportsRootInput: string,
   storedPath: string,
   format: "html" | "json" | "pdf-ready",
-  reportType: "COMPLETE_SCAN" | "COMPLETE_SCAN_PDF_READY" | "VULNERABILITY",
+  reportType:
+    | "EXECUTIVE"
+    | "EXECUTIVE_PDF_READY"
+    | "COMPLETE_SCAN"
+    | "COMPLETE_SCAN_PDF_READY"
+    | "VULNERABILITY",
 ): string {
   if (!["html", "json", "pdf-ready"].includes(format)) {
     throw new BadRequestException("Unsupported report format.");
@@ -57,7 +64,12 @@ export function resolveStoredReportPath(
     if (reportType === "VULNERABILITY") {
       throw new BadRequestException("PDF-ready output is available for complete scan reports.");
     }
-    requestedPath = resolve(dirname(storedPath), "scan-report.pdf-ready.html");
+    requestedPath = resolve(
+      dirname(storedPath),
+      reportType.startsWith("EXECUTIVE")
+        ? "executive-report.pdf-ready.html"
+        : "scan-report.pdf-ready.html",
+    );
   }
   const reportsRoot = resolve(reportsRootInput);
   const absolutePath = resolve(requestedPath);
@@ -126,8 +138,15 @@ export class ScansService {
     });
   }
 
-  async evidence(workspaceId: string, scanId: string) {
+  async evidence(workspaceId: string, scanId: string, actorId: string) {
     await this.assertWorkspaceScan(workspaceId, scanId);
+    await this.audit.record({
+      workspaceId,
+      actorId,
+      action: "evidence.read",
+      resourceType: "Scan",
+      resourceId: scanId,
+    });
     return this.prisma.evidence.findMany({
       where: { workspaceId, scanId },
       orderBy: { timestamp: "asc" },
@@ -149,6 +168,104 @@ export class ScansService {
       (left, right) =>
         rank[right.severity] - rank[left.severity] || left.publicId.localeCompare(right.publicId),
     );
+  }
+
+  async assessmentSummary(workspaceId: string, scanId: string) {
+    await this.assertWorkspaceScan(workspaceId, scanId);
+    const [findings, comparison, analyses, provider, urls, endpoints, evidence] = await Promise.all(
+      [
+        this.prisma.finding.findMany({
+          where: { workspaceId, scanId },
+          select: {
+            severity: true,
+            trendStatus: true,
+            remediationPriority: true,
+            asset: true,
+          },
+        }),
+        this.prisma.scanComparison.findUnique({
+          where: { scanId },
+          include: {
+            findings: {
+              where: { trendStatus: { in: ["RESOLVED", "UNVERIFIED"] } },
+              include: {
+                previousFinding: { select: { publicId: true, title: true, severity: true } },
+              },
+            },
+          },
+        }),
+        this.prisma.aIAnalysis.findMany({
+          where: { workspaceId, scanId },
+          select: { findingId: true, status: true, schemaValid: true, evidenceValid: true },
+        }),
+        this.prisma.modelProvider.findFirst({
+          where: { OR: [{ workspaceId }, { workspaceId: null }] },
+          select: { id: true },
+        }),
+        this.prisma.discoveredURL.count({ where: { workspaceId, scanId } }),
+        this.prisma.discoveredEndpoint.count({ where: { workspaceId, scanId } }),
+        this.prisma.evidence.count({ where: { workspaceId, scanId } }),
+      ],
+    );
+    const validatedAnalyses = new Set(
+      analyses
+        .filter(
+          ({ findingId, status, schemaValid, evidenceValid }) =>
+            findingId && status === "COMPLETED" && schemaValid === true && evidenceValid === true,
+        )
+        .map(({ findingId }) => findingId),
+    ).size;
+    const qwenStatus = !provider
+      ? "NOT_CONFIGURED"
+      : findings.length === 0 || analyses.length === 0
+        ? "NOT_RUN"
+        : validatedAnalyses === findings.length
+          ? "COMPLETED"
+          : validatedAnalyses > 0
+            ? "PARTIAL"
+            : "FAILED_OR_WAITING";
+    return {
+      severityCounts: Object.fromEntries(
+        ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"].map((severity) => [
+          severity,
+          findings.filter((finding) => finding.severity === severity).length,
+        ]),
+      ),
+      trendCounts: Object.fromEntries(
+        ["NEW", "RECURRING", "RESOLVED", "REGRESSED", "CHANGED", "UNVERIFIED"].map((trend) => [
+          trend,
+          trend === "RESOLVED" || trend === "UNVERIFIED"
+            ? (comparison?.findings.filter((finding) => finding.trendStatus === trend).length ?? 0)
+            : findings.filter((finding) => finding.trendStatus === trend).length,
+        ]),
+      ),
+      priorityCounts: Object.fromEntries(
+        ["FIX_NOW", "FIX_NEXT", "PLANNED", "HARDENING"].map((priority) => [
+          priority,
+          findings.filter((finding) => finding.remediationPriority === priority).length,
+        ]),
+      ),
+      comparison: comparison
+        ? {
+            previousScanId: comparison.previousScanId,
+            coverageSufficient: comparison.coverageSufficient,
+            coverageRatio: comparison.coverageRatio,
+            summary: comparison.summary,
+            unresolvedPriorFindings: comparison.findings.map((finding) => ({
+              trendStatus: finding.trendStatus,
+              reason: finding.reason,
+              finding: finding.previousFinding,
+            })),
+          }
+        : null,
+      coverage: { urls, endpoints, evidence },
+      qwenAnalysis: {
+        status: qwenStatus,
+        totalFindings: findings.length,
+        validatedAnalyses,
+        failedOrWaitingAnalyses: Math.max(0, findings.length - validatedAnalyses),
+      },
+    };
   }
 
   async finding(workspaceId: string, scanId: string, findingId: string) {
@@ -183,6 +300,7 @@ export class ScansService {
     workspaceId: string,
     scanId: string,
     reportId: string,
+    actorId: string,
     format: "html" | "json" | "pdf-ready" = "html",
   ) {
     const report = await this.prisma.report.findFirst({
@@ -191,13 +309,27 @@ export class ScansService {
     if (!report?.path) throw new NotFoundException("Generated report file was not found.");
     const reportsRoot = resolve(process.env["REPORTS_ROOT"] ?? "../../reports");
     const absolutePath = resolveStoredReportPath(reportsRoot, report.path, format, report.type);
-    try {
-      await access(absolutePath);
-    } catch {
-      throw new NotFoundException("Generated report file is unavailable.");
-    }
+    const artifact =
+      format === "pdf-ready"
+        ? await this.prisma.report.findFirst({
+            where: { workspaceId, scanId, path: absolutePath, status: "GENERATED" },
+          })
+        : report;
+    const content = await readVerifiedReport(
+      reportsRoot,
+      absolutePath,
+      format === "json" ? report.jsonSha256 : (artifact?.sha256 ?? null),
+    );
+    await this.audit.record({
+      workspaceId,
+      actorId,
+      action: "report.downloaded",
+      resourceType: "Report",
+      resourceId: report.id,
+      metadata: { format },
+    });
     return {
-      stream: createReadStream(absolutePath),
+      stream: Readable.from(content),
       contentType:
         format === "json" ? "application/json; charset=utf-8" : "text/html; charset=utf-8",
       filename: basename(absolutePath),
@@ -217,11 +349,27 @@ export class ScansService {
     actorId: string,
     input: {
       targetId: string;
+      engagementId: string;
       name: string;
       config?: Partial<ScanConfigInput>;
       profile: ScanProfile;
     },
   ) {
+    await requirePermission(this.prisma, { workspaceId, userId: actorId }, "test.execute.safe");
+    const engagement = await this.prisma.engagement.findFirst({
+      where: { id: input.engagementId, workspaceId },
+    });
+    if (!engagement) throw new NotFoundException("Engagement does not exist in this workspace.");
+    const assigned = await this.prisma.engagementTarget.findFirst({
+      where: {
+        workspaceId,
+        engagementId: engagement.id,
+        policyRevision: engagement.policyRevision,
+        targetId: input.targetId,
+      },
+    });
+    if (!assigned)
+      throw new ConflictException("Target is not assigned to the current engagement scope.");
     const target = await this.prisma.target.findFirst({
       where: { id: input.targetId, workspaceId },
       include: { scopeRules: { where: { enabled: true } } },
@@ -244,6 +392,7 @@ export class ScansService {
       data: {
         workspaceId,
         targetId: target.id,
+        engagementId: engagement.id,
         createdById: actorId,
         name: input.name.trim(),
         state: DatabaseScanState.CREATED,
@@ -262,7 +411,6 @@ export class ScansService {
         },
         stages: {
           create: pipelineStages.map((name) => ({
-            workspaceId,
             name: name as DatabaseScanState,
             status: StageStatus.QUEUED,
           })),
@@ -296,6 +444,13 @@ export class ScansService {
     assertScanTransition(scan.state as ScanState, "QUEUED");
     const idempotencyKey = `orchestrate:${scan.id}:v1`;
     const queued = await this.prisma.$transaction(async (transaction) => {
+      const authorization = await authorizeScanQueue(
+        transaction,
+        { workspaceId, userId: actorId },
+        scan.id,
+        scan.target.origin,
+      );
+      if (!authorization.decision.permitted) return { denial: authorization.decision.code };
       const reservedTarget = await transaction.target.updateMany({
         where: {
           id: scan.targetId,
@@ -338,10 +493,11 @@ export class ScansService {
       return { job, scanId: scan.id };
     });
 
+    if ("denial" in queued) throw new GovernanceError(403, queued.denial ?? "EXECUTION_DENIED");
     const published = await this.publisher.publish(queued.job.id, { workspaceId, scanId: scan.id });
     if (published) {
-      await this.prisma.scanJob.update({
-        where: { id: queued.job.id },
+      await this.prisma.scanJob.updateMany({
+        where: { id: queued.job.id, workspaceId, status: JobStatus.CREATED },
         data: { status: JobStatus.QUEUED, bullJobId: queued.job.id },
       });
     } else {

@@ -4,8 +4,15 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   resolve: {
     alias: {
+      "@aasp/database": fileURLToPath(new URL("./packages/database/src/index.ts", import.meta.url)),
+      "@aasp/engagement-engine": fileURLToPath(
+        new URL("./services/engagement-engine/src/index.ts", import.meta.url),
+      ),
       "@aasp/scope-engine": fileURLToPath(
         new URL("./services/scope-engine/src/index.ts", import.meta.url),
+      ),
+      "@aasp/authorization-engine": fileURLToPath(
+        new URL("./services/authorization-engine/src/index.ts", import.meta.url),
       ),
       "@aasp/crawler": fileURLToPath(new URL("./services/crawler/src/index.ts", import.meta.url)),
       "@aasp/api-discovery": fileURLToPath(
@@ -35,6 +42,9 @@ export default defineConfig({
       "@aasp/scanner-cors": fileURLToPath(
         new URL("./services/scanner-cors/src/index.ts", import.meta.url),
       ),
+      "@aasp/scanner-application": fileURLToPath(
+        new URL("./services/scanner-application/src/index.ts", import.meta.url),
+      ),
       "@aasp/finding-engine": fileURLToPath(
         new URL("./services/finding-engine/src/index.ts", import.meta.url),
       ),
@@ -47,14 +57,19 @@ export default defineConfig({
       "@aasp/report-engine": fileURLToPath(
         new URL("./services/report-engine/src/index.ts", import.meta.url),
       ),
+      "@aasp/longitudinal-engine": fileURLToPath(
+        new URL("./services/longitudinal-engine/src/index.ts", import.meta.url),
+      ),
       "@aasp/schemas": fileURLToPath(new URL("./packages/schemas/src/index.ts", import.meta.url)),
       "@aasp/security-core": fileURLToPath(
         new URL("./packages/security-core/src/index.ts", import.meta.url),
       ),
+      "@aasp/logger": fileURLToPath(new URL("./packages/logger/src/index.ts", import.meta.url)),
     },
   },
   test: {
     environment: "node",
+    exclude: ["tests/database/**", "node_modules/**"],
     include: ["tests/**/*.test.ts", "apps/**/test/**/*.test.ts"],
     coverage: {
       reporter: ["text", "json-summary"],

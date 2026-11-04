@@ -1,23 +1,27 @@
 import "reflect-metadata";
 import { randomUUID } from "node:crypto";
 import { NestFactory } from "@nestjs/core";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import type { Request, Response, NextFunction } from "express";
 import { AppModule } from "./app.module.js";
 import { loadEnvironment } from "./config/environment.js";
 
 async function bootstrap(): Promise<void> {
   const environment = loadEnvironment();
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
+  app.useBodyParser("json", { limit: "1500kb" });
   app.setGlobalPrefix("api");
   app.enableShutdownHooks();
   app.use((request: Request, response: Response, next: NextFunction) => {
     const requestId = request.header("x-request-id") ?? randomUUID();
     response.setHeader("x-request-id", requestId);
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("X-Content-Type-Options", "nosniff");
     next();
   });
   app.enableCors({
     origin: process.env["APP_BASE_URL"] ?? "http://localhost:3000",
-    methods: ["GET", "POST", "PATCH", "DELETE"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     allowedHeaders: ["authorization", "content-type", "x-request-id"],
     credentials: false,
   });

@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const port = Number(process.env["FIXTURE_PORT"] ?? "4010");
 
@@ -38,194 +40,327 @@ function requestUrl(request: IncomingMessage): URL {
   return new URL(request.url ?? "/", `http://${request.headers.host ?? "fixture.internal:4010"}`);
 }
 
-const server = createServer((request, response) => {
-  const url = requestUrl(request);
-  if (url.pathname === "/health") {
-    send(response, 200, "application/json", JSON.stringify({ status: "ok" }));
-    return;
-  }
-  if (url.pathname === "/") {
-    send(
-      response,
-      200,
-      "text/html",
-      html(
-        "Authorized assessment fixture",
-        '<h1>Owned test fixture</h1><p>This application is intentionally configured for safe assessment tests.</p><a href="/calendar/2026/08?page=1">Calendar</a><a href="/openapi.json">OpenAPI</a><a href="/graphql">GraphQL route</a><a href="/cors">CORS fixture</a><a href="/redirect?next=/about">Redirect fixture</a><a href="/error">Error fixture</a><a href="/assets/app.js.map">Source map fixture</a>',
-      ),
-      { "set-cookie": "fixture_session=local-demo-value; Path=/" },
-    );
-    return;
-  }
-  if (url.pathname === "/about") {
-    send(
-      response,
-      200,
-      "text/html",
-      html("About", "<h1>About the fixture</h1><p>Only local test data is served.</p>"),
-    );
-    return;
-  }
-  if (url.pathname === "/login") {
-    send(
-      response,
-      200,
-      "text/html",
-      html(
-        "Login fixture",
-        '<h1>Login</h1><form method="post" action="/session"><label>Email <input name="email" type="email"></label><label>Password <input name="password" type="password"></label><button type="submit">Sign in</button></form><a href="/forgot-password">Forgot password</a>',
-      ),
-    );
-    return;
-  }
-  if (url.pathname === "/forgot-password") {
-    send(
-      response,
-      200,
-      "text/html",
-      html(
-        "Password reset",
-        '<form method="post" action="/api/password-reset"><input name="email" type="email"></form>',
-      ),
-    );
-    return;
-  }
-  if (url.pathname.startsWith("/calendar/")) {
-    const match = /^\/calendar\/(\d{4})\/(\d{1,2})$/.exec(url.pathname);
-    const year = Number(match?.[1] ?? "2026");
-    const month = Number(match?.[2] ?? "1");
-    const nextMonth = month === 12 ? 1 : month + 1;
-    const nextYear = month === 12 ? year + 1 : year;
-    send(
-      response,
-      200,
-      "text/html",
-      html(
-        "Calendar",
-        `<a href="/calendar/${nextYear}/${nextMonth}?page=${Number(url.searchParams.get("page") ?? "1") + 1}">Next</a>`,
-      ),
-    );
-    return;
-  }
-  if (url.pathname === "/robots.txt") {
-    send(
-      response,
-      200,
-      "text/plain",
-      "User-agent: *\nDisallow: /internal-only\nSitemap: http://fixture.internal:4010/sitemap.xml\n",
-    );
-    return;
-  }
-  if (url.pathname === "/sitemap.xml") {
-    send(
-      response,
-      200,
-      "application/xml",
-      '<?xml version="1.0"?><urlset><url><loc>http://fixture.internal:4010/</loc></url><url><loc>http://fixture.internal:4010/about</loc></url><url><loc>http://fixture.internal:4010/login</loc></url></urlset>',
-    );
-    return;
-  }
-  if (url.pathname === "/.well-known/security.txt") {
-    send(
-      response,
-      200,
-      "text/plain",
-      "Contact: mailto:security@fixture.internal\nPolicy: http://fixture.internal:4010/security-policy\n",
-    );
-    return;
-  }
-  if (url.pathname === "/openapi.json" || url.pathname === "/swagger.json") {
-    send(
-      response,
-      200,
-      "application/json",
-      JSON.stringify({
-        openapi: "3.1.0",
-        info: { title: "Authorized fixture API", version: "1.0.0" },
-        paths: {
-          "/api/users": {
-            get: { parameters: [{ name: "page", in: "query", schema: { type: "integer" } }] },
-          },
-          "/api/users/{id}": {
-            get: { parameters: [{ name: "id", in: "path", schema: { type: "string" } }] },
-          },
-          "/api/password-reset": {
-            post: { requestBody: { required: true } },
-          },
-        },
-      }),
-    );
-    return;
-  }
-  if (url.pathname === "/api/users") {
-    send(
-      response,
-      200,
-      "application/json",
-      JSON.stringify({ page: Number(url.searchParams.get("page") ?? "1"), users: [] }),
-    );
-    return;
-  }
-  if (url.pathname === "/graphql") {
-    send(response, 405, "application/json", JSON.stringify({ error: "POST required" }), {
-      allow: "POST",
-    });
-    return;
-  }
-  if (url.pathname === "/cors") {
-    send(response, 200, "application/json", JSON.stringify({ fixture: true }), {
-      "access-control-allow-origin": request.headers.origin ?? "*",
-      "access-control-allow-credentials": "true",
-    });
-    return;
-  }
-  if (url.pathname === "/redirect") {
-    response.writeHead(302, { location: url.searchParams.get("next") ?? "/" });
-    response.end();
-    return;
-  }
-  if (url.pathname === "/error") {
-    send(
-      response,
-      500,
-      "text/plain",
-      "FixtureError: controlled verbose error\n    at fixture-route (/srv/fixture/src/main.ts:1:1)",
-    );
-    return;
-  }
-  if (url.pathname === "/assets/app.js") {
-    send(
-      response,
-      200,
-      "application/javascript",
-      'const apiRoute = "/api/users"; const authRoute = "/auth/callback";\n//# sourceMappingURL=app.js.map',
-    );
-    return;
-  }
-  if (url.pathname === "/assets/app.js.map") {
-    send(
-      response,
-      200,
-      "application/json",
-      JSON.stringify({ version: 3, sources: ["src/app.ts"], names: [], mappings: "" }),
-    );
-    return;
-  }
-  send(response, 404, "text/html", html("Not found", "<h1>Not found</h1>"));
-});
+interface FixtureIdentity {
+  id: string;
+  role: "USER" | "MANAGER" | "ADMIN";
+  tenant: "ACME" | "GLOBEX";
+}
 
-server.listen(port, "0.0.0.0", () => {
-  process.stdout.write(`${JSON.stringify({ level: "info", message: "fixture.started", port })}\n`);
-});
+const fixtureIdentities: Readonly<Record<string, FixtureIdentity>> = {
+  alice: { id: "alice", role: "USER", tenant: "ACME" },
+  bob: { id: "bob", role: "USER", tenant: "ACME" },
+  charlie: { id: "charlie", role: "USER", tenant: "GLOBEX" },
+  manager: { id: "manager", role: "MANAGER", tenant: "ACME" },
+  admin: { id: "admin", role: "ADMIN", tenant: "ACME" },
+};
 
-function shutdown(): void {
-  server.close((error) => {
-    if (error) {
-      process.stderr.write(`${error.message}\n`);
-      process.exitCode = 1;
+const fixtureOrders = {
+  "order-alice": {
+    id: "order-alice",
+    owner: "alice",
+    tenant: "ACME",
+    customer: { email: "alice@example.invalid", phone: "+0-000-000-0000" },
+    shipping: { address: "Fixture street" },
+    payment: { last4: "0000" },
+  },
+  "order-bob": {
+    id: "order-bob",
+    owner: "bob",
+    tenant: "ACME",
+    customer: { email: "bob@example.invalid", phone: "+0-000-000-0001" },
+    shipping: { address: "Fixture avenue" },
+    payment: { last4: "0001" },
+  },
+  "order-charlie": {
+    id: "order-charlie",
+    owner: "charlie",
+    tenant: "GLOBEX",
+    customer: { email: "charlie@example.invalid", phone: "+0-000-000-0002" },
+    shipping: { address: "Fixture road" },
+    payment: { last4: "0002" },
+  },
+} as const;
+
+function fixtureIdentity(request: IncomingMessage): FixtureIdentity | null {
+  const value = request.headers["x-fixture-identity"];
+  return typeof value === "string" ? (fixtureIdentities[value] ?? null) : null;
+}
+
+export function createFixtureServer() {
+  return createServer((request, response) => {
+    const url = requestUrl(request);
+    if (url.pathname === "/health") {
+      send(response, 200, "application/json", JSON.stringify({ status: "ok" }));
+      return;
     }
+    if (url.pathname === "/") {
+      send(
+        response,
+        200,
+        "text/html",
+        html(
+          "Authorized assessment fixture",
+          '<h1>Owned test fixture</h1><p>This application is intentionally configured for safe assessment tests.</p><a href="/calendar/2026/08?page=1">Calendar</a><a href="/search?q=fixture">Search reflection fixture</a><a href="/upload">Upload surface fixture</a><a href="/openapi.json">OpenAPI</a><a href="/graphql">GraphQL route</a><a href="/cors">CORS fixture</a><a href="/redirect?next=/about">Redirect fixture</a><a href="/error">Error fixture</a><a href="/assets/app.js.map">Source map fixture</a>',
+        ),
+        { "set-cookie": "fixture_session=local-demo-value; Path=/" },
+      );
+      return;
+    }
+    if (url.pathname === "/about") {
+      send(
+        response,
+        200,
+        "text/html",
+        html("About", "<h1>About the fixture</h1><p>Only local test data is served.</p>"),
+      );
+      return;
+    }
+    if (url.pathname === "/login") {
+      send(
+        response,
+        200,
+        "text/html",
+        html(
+          "Login fixture",
+          '<h1>Login</h1><form method="post" action="/session"><label>Email <input name="email" type="email"></label><label>Password <input name="password" type="password"></label><button type="submit">Sign in</button></form><a href="/forgot-password">Forgot password</a>',
+        ),
+      );
+      return;
+    }
+    if (url.pathname === "/forgot-password") {
+      send(
+        response,
+        200,
+        "text/html",
+        html(
+          "Password reset",
+          '<form method="post" action="/api/password-reset"><input name="email" type="email"></form>',
+        ),
+      );
+      return;
+    }
+    if (url.pathname === "/search") {
+      send(
+        response,
+        200,
+        "text/html",
+        html("Search fixture", `<p>Search term: ${url.searchParams.get("q") ?? ""}</p>`),
+      );
+      return;
+    }
+    if (url.pathname === "/upload") {
+      send(
+        response,
+        200,
+        "text/html",
+        html(
+          "Upload fixture",
+          '<form method="post" action="/api/upload" enctype="multipart/form-data"><input name="document" type="file"><button type="submit">Upload fixture file</button></form>',
+        ),
+      );
+      return;
+    }
+    if (url.pathname.startsWith("/calendar/")) {
+      const match = /^\/calendar\/(\d{4})\/(\d{1,2})$/.exec(url.pathname);
+      const year = Number(match?.[1] ?? "2026");
+      const month = Number(match?.[2] ?? "1");
+      const nextMonth = month === 12 ? 1 : month + 1;
+      const nextYear = month === 12 ? year + 1 : year;
+      send(
+        response,
+        200,
+        "text/html",
+        html(
+          "Calendar",
+          `<a href="/calendar/${nextYear}/${nextMonth}?page=${Number(url.searchParams.get("page") ?? "1") + 1}">Next</a>`,
+        ),
+      );
+      return;
+    }
+    if (url.pathname === "/robots.txt") {
+      send(
+        response,
+        200,
+        "text/plain",
+        "User-agent: *\nDisallow: /internal-only\nSitemap: http://fixture.internal:4010/sitemap.xml\n",
+      );
+      return;
+    }
+    if (url.pathname === "/sitemap.xml") {
+      send(
+        response,
+        200,
+        "application/xml",
+        '<?xml version="1.0"?><urlset><url><loc>http://fixture.internal:4010/</loc></url><url><loc>http://fixture.internal:4010/about</loc></url><url><loc>http://fixture.internal:4010/login</loc></url></urlset>',
+      );
+      return;
+    }
+    if (url.pathname === "/.well-known/security.txt") {
+      send(
+        response,
+        200,
+        "text/plain",
+        "Contact: mailto:security@fixture.internal\nPolicy: http://fixture.internal:4010/security-policy\n",
+      );
+      return;
+    }
+    if (url.pathname === "/openapi.json" || url.pathname === "/swagger.json") {
+      send(
+        response,
+        200,
+        "application/json",
+        JSON.stringify({
+          openapi: "3.1.0",
+          info: { title: "Authorized fixture API", version: "1.0.0" },
+          paths: {
+            "/api/users": {
+              get: { parameters: [{ name: "page", in: "query", schema: { type: "integer" } }] },
+            },
+            "/api/users/{id}": {
+              get: { parameters: [{ name: "id", in: "path", schema: { type: "string" } }] },
+            },
+            "/api/password-reset": {
+              post: { requestBody: { required: true } },
+            },
+          },
+        }),
+      );
+      return;
+    }
+    if (url.pathname === "/api/users") {
+      send(
+        response,
+        200,
+        "application/json",
+        JSON.stringify({ page: Number(url.searchParams.get("page") ?? "1"), users: [] }),
+      );
+      return;
+    }
+    const orderMatch = /^\/api\/authorization\/(vulnerable\/)?orders\/([^/]+)$/u.exec(url.pathname);
+    if (orderMatch) {
+      const identity = fixtureIdentity(request);
+      if (!identity) {
+        send(
+          response,
+          401,
+          "application/json",
+          JSON.stringify({ error: "authentication_required" }),
+        );
+        return;
+      }
+      const orderId = orderMatch[2] as keyof typeof fixtureOrders;
+      const order = fixtureOrders[orderId];
+      if (!order) {
+        send(response, 404, "application/json", JSON.stringify({ error: "not_found" }));
+        return;
+      }
+      const intentionallyVulnerable = Boolean(orderMatch[1]);
+      const permitted =
+        intentionallyVulnerable ||
+        identity.role === "ADMIN" ||
+        identity.id === order.owner ||
+        (identity.role === "MANAGER" && identity.tenant === order.tenant);
+      if (!permitted) {
+        send(response, 403, "application/json", JSON.stringify({ error: "forbidden" }));
+        return;
+      }
+      send(response, 200, "application/json", JSON.stringify(order));
+      return;
+    }
+    if (
+      url.pathname === "/api/authorization/admin/audit" ||
+      url.pathname === "/api/authorization/vulnerable/admin/audit"
+    ) {
+      const identity = fixtureIdentity(request);
+      if (!identity) {
+        send(
+          response,
+          401,
+          "application/json",
+          JSON.stringify({ error: "authentication_required" }),
+        );
+        return;
+      }
+      const intentionallyVulnerable = url.pathname.includes("/vulnerable/");
+      if (!intentionallyVulnerable && identity.role !== "ADMIN") {
+        send(response, 403, "application/json", JSON.stringify({ error: "forbidden" }));
+        return;
+      }
+      send(
+        response,
+        200,
+        "application/json",
+        JSON.stringify({ records: [{ id: "audit-fixture", internalNotes: "fixture-only" }] }),
+      );
+      return;
+    }
+    if (url.pathname === "/graphql") {
+      send(response, 405, "application/json", JSON.stringify({ error: "POST required" }), {
+        allow: "POST",
+      });
+      return;
+    }
+    if (url.pathname === "/cors") {
+      send(response, 200, "application/json", JSON.stringify({ fixture: true }), {
+        "access-control-allow-origin": request.headers.origin ?? "*",
+        "access-control-allow-credentials": "true",
+      });
+      return;
+    }
+    if (url.pathname === "/redirect") {
+      response.writeHead(302, { location: url.searchParams.get("next") ?? "/" });
+      response.end();
+      return;
+    }
+    if (url.pathname === "/error") {
+      send(
+        response,
+        500,
+        "text/plain",
+        "FixtureError: controlled verbose error\n    at fixture-route (/srv/fixture/src/main.ts:1:1)",
+      );
+      return;
+    }
+    if (url.pathname === "/assets/app.js") {
+      send(
+        response,
+        200,
+        "application/javascript",
+        'const apiRoute = "/api/users"; const authRoute = "/auth/callback"; function renderFixture(value) { document.querySelector("#fixture").innerHTML = value; }\n//# sourceMappingURL=app.js.map',
+      );
+      return;
+    }
+    if (url.pathname === "/assets/app.js.map") {
+      send(
+        response,
+        200,
+        "application/json",
+        JSON.stringify({ version: 3, sources: ["src/app.ts"], names: [], mappings: "" }),
+      );
+      return;
+    }
+    send(response, 404, "text/html", html("Not found", "<h1>Not found</h1>"));
   });
 }
 
-process.once("SIGTERM", shutdown);
-process.once("SIGINT", shutdown);
+const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : null;
+if (invokedPath === import.meta.url) {
+  const server = createFixtureServer();
+  server.listen(port, "0.0.0.0", () => {
+    process.stdout.write(
+      `${JSON.stringify({ level: "info", message: "fixture.started", port })}\n`,
+    );
+  });
+
+  function shutdown(): void {
+    server.close((error) => {
+      if (error) {
+        process.stderr.write(`${error.message}\n`);
+        process.exitCode = 1;
+      }
+    });
+  }
+
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
+}
